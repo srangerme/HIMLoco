@@ -30,8 +30,10 @@
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
+import subprocess
 
 import isaacgym
+from isaacgym import gymapi
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
 
@@ -41,19 +43,107 @@ import torch
 
 def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
+    initial_yaw_rad = np.deg2rad(args.initial_yaw_deg)
+    env_cfg.init_state.rot = [
+        0.0,
+        0.0,
+        float(np.sin(0.5 * initial_yaw_rad)),
+        float(np.cos(0.5 * initial_yaw_rad)),
+    ]
     # override some parameters for testing
-    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
-    env_cfg.terrain.num_rows = 10
-    env_cfg.terrain.num_cols = 8
+    env_cfg.env.num_envs = 1 if args.video_path else (args.num_envs or min(env_cfg.env.num_envs, 50))
+    env_cfg.env.enable_camera_sensors = bool(args.video_path)
+    if args.acceptance_trace or args.video_path:
+        requested_duration = (
+            args.video_seconds if args.video_path else args.rollout_seconds
+        )
+        env_cfg.env.episode_length_s = max(
+            env_cfg.env.episode_length_s, requested_duration + 1.0
+        )
     env_cfg.terrain.curriculum = True
-    env_cfg.terrain.max_init_terrain_level = 9
-    env_cfg.noise.add_noise = False
-    env_cfg.domain_rand.randomize_friction = False
-    env_cfg.domain_rand.push_robots = False
-    env_cfg.domain_rand.disturbance = False
-    env_cfg.domain_rand.randomize_payload_mass = False
+    env_cfg.terrain.max_init_terrain_level = (
+        9 if args.max_terrain_level is None else args.max_terrain_level
+    )
+    if args.terrain_level is not None:
+        if args.terrain_level < 0 or args.terrain_level >= env_cfg.terrain.num_rows:
+            raise ValueError("--terrain_level must be within the configured terrain rows")
+        env_cfg.terrain.fixed_init_level = args.terrain_level
+        env_cfg.terrain.max_init_terrain_level = args.terrain_level
+    if not args.acceptance_randomization:
+        env_cfg.noise.add_noise = False
+        env_cfg.domain_rand.randomize_friction = False
+        env_cfg.domain_rand.randomize_restitution = False
+        env_cfg.domain_rand.push_robots = False
+        env_cfg.domain_rand.disturbance = False
+        env_cfg.domain_rand.randomize_payload_mass = False
+        env_cfg.domain_rand.randomize_com_displacement = False
+        env_cfg.domain_rand.randomize_link_mass = False
+        env_cfg.domain_rand.randomize_motor_strength = False
+        env_cfg.domain_rand.randomize_kp = False
+        env_cfg.domain_rand.randomize_kd = False
+        env_cfg.domain_rand.randomize_initial_joint_pos = False
+        env_cfg.domain_rand.randomize_joint_friction = False
+        env_cfg.domain_rand.randomize_joint_damping = False
+        env_cfg.domain_rand.observation_latency = False
+    if args.acceptance_latency_ms is not None:
+        env_cfg.domain_rand.observation_latency = args.acceptance_latency_ms > 0.0
+        env_cfg.domain_rand.observation_latency_range = [
+            args.acceptance_latency_ms,
+            args.acceptance_latency_ms,
+        ]
+        env_cfg.domain_rand.observation_latency_min_probability = 0.0
+        env_cfg.domain_rand.observation_latency_max_probability = 0.0
+    if args.acceptance_restitution is not None:
+        env_cfg.domain_rand.randomize_restitution = True
+        env_cfg.domain_rand.restitution_range = [
+            args.acceptance_restitution,
+            args.acceptance_restitution,
+        ]
     env_cfg.commands.heading_command = False
-    # env_cfg.terrain.mesh_type = 'plane'
+    env_cfg.asset.dof_velocity_limit_scale = args.velocity_limit_scale
+    if args.play_terrain == "plane":
+        env_cfg.terrain.mesh_type = "plane"
+    elif args.play_terrain == "stairs":
+        env_cfg.terrain.up_down_stairs = True
+        env_cfg.terrain.continuous_uneven = False
+        env_cfg.terrain.up_down_stair_height = args.stair_step_height
+        env_cfg.terrain.spawn_offset_x = 1.5
+        env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
+        env_cfg.terrain.num_cols = 1
+        env_cfg.viewer.pos = [0.0, -1.25, 0.58]
+        env_cfg.viewer.lookat = [0.25, 0.0, 0.20]
+    elif args.play_terrain == "uneven":
+        # Acceptance-only continuous random height field.  The standard
+        # discrete-obstacle generator leaves a 3 m flat spawn platform, which
+        # can make a short rollout look like an uneven-ground test even though
+        # most of the motion happened on the platform.
+        env_cfg.terrain.continuous_uneven = True
+        env_cfg.terrain.spawn_offset_x = 2.0
+        env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
+        env_cfg.terrain.num_cols = 1
+        env_cfg.viewer.pos = [0.0, -1.40, 0.65]
+        env_cfg.viewer.lookat = [0.25, 0.0, 0.20]
+    elif args.play_terrain != "rough":
+        raise ValueError("--play_terrain must be 'rough', 'stairs', 'uneven', or 'plane'")
+    if env_cfg.terrain.mesh_type not in ("plane", "none"):
+        travel_seconds = args.video_seconds if args.video_path else args.rollout_seconds
+        world_x_vel = x_vel * np.cos(initial_yaw_rad) - y_vel * np.sin(initial_yaw_rad)
+        world_y_vel = x_vel * np.sin(initial_yaw_rad) + y_vel * np.cos(initial_yaw_rad)
+        # Stair recordings need more boundary clearance: long oblique runs
+        # previously reached the edge before completing the down flight.
+        boundary_margin = 8.0 if args.play_terrain == "stairs" else 4.0
+        required_length = abs(world_x_vel) * travel_seconds + boundary_margin
+        # Terrain origins are centered in Y, so diagonal validation needs
+        # clearance on both sides of the center line.
+        required_width = 2.0 * abs(world_y_vel) * travel_seconds + boundary_margin
+        env_cfg.terrain.terrain_length = max(
+            env_cfg.terrain.terrain_length,
+            required_length,
+        )
+        env_cfg.terrain.terrain_width = max(
+            env_cfg.terrain.terrain_width,
+            required_width,
+        )
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     env.commands[:, 0] = x_vel
@@ -82,14 +172,165 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     camera_vel = np.array([1., 1., 0.])
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
+    acceptance_trace = None
+    if args.acceptance_trace:
+        acceptance_trace = {
+            "joint_torque_nm": [],
+            "joint_velocity_rad_s": [],
+            "dynamic_torque_limit_nm": [],
+            "base_height_m": [],
+            "base_lin_vel_m_s": [],
+            "base_ang_vel_rad_s": [],
+            "base_quaternion_xyzw": [],
+            "root_position_m": [],
+            "command_velocity": [],
+            "dof_position_rad": [],
+            "action": [],
+            "foot_position_m": [],
+            "foot_velocity_m_s": [],
+            "foot_height_m": [],
+            "foot_contact": [],
+            "terrain_level": [],
+            "terrain_type": [],
+            "done": [],
+        }
 
-    for i in range(10*int(env.max_episode_length)):
+    video_process = None
+    video_camera = None
+    video_path = None
+    video_width = 1280
+    video_height = 720
+    video_stride = max(1, round(1.0 / (args.video_fps * env.dt)))
+    if args.video_path:
+        video_camera = env.camera_handle
+        video_path = os.path.abspath(args.video_path)
+        video_dir = os.path.dirname(video_path)
+        if video_dir:
+            os.makedirs(video_dir, exist_ok=True)
+        ffmpeg_env = os.environ.copy()
+        ffmpeg_env["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+        video_process = subprocess.Popen(
+            [
+                "/usr/bin/ffmpeg", "-y", "-loglevel", "error",
+                "-f", "rawvideo", "-pixel_format", "rgba",
+                "-video_size", f"{video_width}x{video_height}",
+                "-framerate", str(args.video_fps), "-i", "-",
+                "-an", "-c:v", "libx264", "-preset", "medium",
+                "-crf", "20", "-pix_fmt", "yuv420p", video_path,
+            ],
+            stdin=subprocess.PIPE,
+            env=ffmpeg_env,
+        )
+
+    if args.video_path:
+        num_steps = int(np.ceil(args.video_seconds / env.dt))
+    elif args.acceptance_trace:
+        num_steps = int(np.ceil(args.rollout_seconds / env.dt))
+    else:
+        num_steps = 10 * int(env.max_episode_length)
+    for i in range(num_steps):
     
         actions = policy(obs.detach())
         env.commands[:, 0] = x_vel
         env.commands[:, 1] = y_vel
         env.commands[:, 2] = yaw_vel
         obs, _, rews, dones, infos, _, _ = env.step(actions.detach())
+
+        if video_process is not None and i % video_stride == 0:
+            env.gym.fetch_results(env.sim, True)
+            # Camera sensors use the simulation frame here. Rough-terrain
+            # actors are placed at non-zero terrain origins, so track the
+            # absolute root pose rather than terrain-relative coordinates.
+            robot_xyz = env.root_states[0, :3].detach().cpu().numpy()
+            camera_position = np.asarray(env_cfg.viewer.pos).copy()
+            camera_target = np.asarray(env_cfg.viewer.lookat).copy()
+            camera_position[:2] += robot_xyz[:2]
+            camera_target[:2] += robot_xyz[:2]
+            camera_height_delta = robot_xyz[2] - env_cfg.rewards.base_height_target
+            camera_position[2] += camera_height_delta
+            camera_target[2] += camera_height_delta
+            env.gym.step_graphics(env.sim)
+            env.gym.set_camera_location(
+                video_camera,
+                env.envs[0],
+                gymapi.Vec3(*camera_position),
+                gymapi.Vec3(*camera_target),
+            )
+            env.gym.render_all_camera_sensors(env.sim)
+            frame = env.gym.get_camera_image(
+                env.sim, env.envs[0], video_camera, gymapi.IMAGE_COLOR
+            )
+            frame = np.asarray(frame, dtype=np.uint8).reshape(
+                video_height, video_width, 4
+            )
+            video_process.stdin.write(frame.tobytes())
+
+        if acceptance_trace is not None:
+            acceptance_trace["joint_torque_nm"].append(
+                env.actuator_torques.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["joint_velocity_rad_s"].append(
+                env.dof_vel.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["dynamic_torque_limit_nm"].append(
+                env.dynamic_torque_limits.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["base_height_m"].append(
+                env._get_base_heights().detach().cpu().numpy().copy()
+            )
+            acceptance_trace["base_lin_vel_m_s"].append(
+                env.base_lin_vel.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["base_ang_vel_rad_s"].append(
+                env.base_ang_vel.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["base_quaternion_xyzw"].append(
+                env.base_quat.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["root_position_m"].append(
+                env.root_states[:, :3].detach().cpu().numpy().copy()
+            )
+            acceptance_trace["command_velocity"].append(
+                env.commands[:, :3].detach().cpu().numpy().copy()
+            )
+            acceptance_trace["dof_position_rad"].append(
+                env.dof_pos.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["action"].append(
+                env.actions.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["foot_position_m"].append(
+                env.feet_pos.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["foot_velocity_m_s"].append(
+                env.feet_vel.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["foot_height_m"].append(
+                env._get_feet_heights().detach().cpu().numpy().copy()
+            )
+            acceptance_trace["foot_contact"].append(
+                (env.contact_forces[:, env.feet_indices, 2] > 1.0)
+                .detach().cpu().numpy().copy()
+            )
+            if hasattr(env, "terrain_levels"):
+                terrain_level = env.terrain_levels
+            else:
+                terrain_level = torch.full(
+                    (env.num_envs,), -1, dtype=torch.long, device=env.device
+                )
+            acceptance_trace["terrain_level"].append(
+                terrain_level.detach().cpu().numpy().copy()
+            )
+            if hasattr(env, "terrain_types"):
+                terrain_type = env.terrain_types
+            else:
+                terrain_type = torch.full(
+                    (env.num_envs,), -1, device=env.device, dtype=torch.long
+                )
+            acceptance_trace["terrain_type"].append(
+                terrain_type.detach().cpu().numpy().copy()
+            )
+            acceptance_trace["done"].append(dones.detach().cpu().numpy().copy())
 
         if RECORD_FRAMES:
             if i % 2:
@@ -100,7 +341,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             camera_position += camera_vel * env.dt
             env.set_camera(camera_position, camera_position + camera_direction)
 
-        if i < stop_state_log:
+        if not args.video_path and acceptance_trace is None and i < stop_state_log:
             logger.log_states(
                 {
                     'dof_pos_target': actions[robot_index, joint_index].item() * env.cfg.control.action_scale + env.default_dof_pos[robot_index, joint_index].item(),
@@ -117,7 +358,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
                     'contact_forces_z': env.contact_forces[robot_index, env.feet_indices, 2].cpu().numpy()
                 }
             )
-        elif i==stop_state_log:
+        elif not args.video_path and acceptance_trace is None and i==stop_state_log:
             logger.plot_states()
         if  0 < i < stop_rew_log:
             if infos["episode"]:
@@ -127,9 +368,54 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         elif i==stop_rew_log:
             logger.print_rewards()
 
+    if acceptance_trace is not None:
+        trace_path = os.path.abspath(args.acceptance_trace)
+        os.makedirs(os.path.dirname(trace_path), exist_ok=True)
+        np.savez_compressed(
+            trace_path,
+            joint_torque_nm=np.asarray(acceptance_trace["joint_torque_nm"]),
+            joint_velocity_rad_s=np.asarray(acceptance_trace["joint_velocity_rad_s"]),
+            dynamic_torque_limit_nm=np.asarray(acceptance_trace["dynamic_torque_limit_nm"]),
+            base_height_m=np.asarray(acceptance_trace["base_height_m"]),
+            base_lin_vel_m_s=np.asarray(acceptance_trace["base_lin_vel_m_s"]),
+            base_ang_vel_rad_s=np.asarray(acceptance_trace["base_ang_vel_rad_s"]),
+            base_quaternion_xyzw=np.asarray(acceptance_trace["base_quaternion_xyzw"]),
+            root_position_m=np.asarray(acceptance_trace["root_position_m"]),
+            command_velocity=np.asarray(acceptance_trace["command_velocity"]),
+            dof_position_rad=np.asarray(acceptance_trace["dof_position_rad"]),
+            action=np.asarray(acceptance_trace["action"]),
+            foot_position_m=np.asarray(acceptance_trace["foot_position_m"]),
+            foot_velocity_m_s=np.asarray(acceptance_trace["foot_velocity_m_s"]),
+            foot_height_m=np.asarray(acceptance_trace["foot_height_m"]),
+            foot_contact=np.asarray(acceptance_trace["foot_contact"]),
+            terrain_level=np.asarray(acceptance_trace["terrain_level"]),
+            terrain_type=np.asarray(acceptance_trace["terrain_type"]),
+            done=np.asarray(acceptance_trace["done"]),
+            dt_s=np.asarray(env.dt),
+            dof_names=np.asarray(env.dof_names),
+            foot_names=np.asarray(env.feet_names),
+            velocity_limit_scale=np.asarray(args.velocity_limit_scale),
+            base_height_target_m=np.asarray(env_cfg.rewards.base_height_target),
+            acceptance_randomization=np.asarray(args.acceptance_randomization),
+            acceptance_latency_ms=np.asarray(
+                -1.0 if args.acceptance_latency_ms is None else args.acceptance_latency_ms
+            ),
+            acceptance_restitution=np.asarray(
+                -1.0 if args.acceptance_restitution is None else args.acceptance_restitution
+            ),
+        )
+        print("Saved actuator acceptance trace:", trace_path)
+
+    if video_process is not None:
+        video_process.stdin.close()
+        return_code = video_process.wait()
+        if return_code != 0:
+            raise RuntimeError(f"ffmpeg exited with status {return_code}")
+        print("Saved play video:", video_path)
+
 if __name__ == '__main__':
     EXPORT_POLICY = True
     RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args()
-    play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0)
+    play(args, x_vel=args.command_x, y_vel=args.command_y, yaw_vel=args.command_yaw)

@@ -167,6 +167,23 @@ def get_args():
         {"name": "--num_envs", "type": int, "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
+        {"name": "--acceptance_trace", "type": str, "help": "Write actuator acceptance rollout data to an NPZ file."},
+        {"name": "--velocity_limit_scale", "type": float, "default": 1.0, "help": "Validation-only multiplier for hard DOF velocity limits."},
+        {"name": "--video_path", "type": str, "help": "Record an offscreen MP4 during play."},
+        {"name": "--video_seconds", "type": float, "default": 8.0, "help": "Length of an offscreen play video."},
+        {"name": "--video_fps", "type": int, "default": 25, "help": "Frame rate of an offscreen play video."},
+        {"name": "--play_terrain", "type": str, "default": "rough", "help": "Play terrain: rough, stairs, uneven, or plane."},
+        {"name": "--max_terrain_level", "type": int, "help": "Maximum initial rough-terrain curriculum level for play."},
+        {"name": "--terrain_level", "type": int, "help": "Force one terrain curriculum level during validation."},
+        {"name": "--stair_step_height", "type": float, "default": 0.04, "help": "Step height for the repeated up/down stair validation course."},
+        {"name": "--rollout_seconds", "type": float, "default": 60.0, "help": "Acceptance rollout duration when no video is recorded."},
+        {"name": "--acceptance_randomization", "action": "store_true", "default": False, "help": "Keep training noise and domain randomization enabled during acceptance."},
+        {"name": "--acceptance_latency_ms", "type": float, "help": "Force a fixed observation latency during acceptance."},
+        {"name": "--acceptance_restitution", "type": float, "help": "Force a fixed restitution coefficient during acceptance."},
+        {"name": "--command_x", "type": float, "default": 1.0, "help": "Fixed play command in the X direction."},
+        {"name": "--command_y", "type": float, "default": 0.0, "help": "Fixed play command in the Y direction."},
+        {"name": "--command_yaw", "type": float, "default": 0.0, "help": "Fixed play yaw command."},
+        {"name": "--initial_yaw_deg", "type": float, "default": 0.0, "help": "Initial robot heading in world degrees for validation."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

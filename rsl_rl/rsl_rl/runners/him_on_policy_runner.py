@@ -30,6 +30,7 @@
 
 import time
 import os
+import re
 from collections import deque
 import statistics
 
@@ -145,7 +146,10 @@ class HIMOnPolicyRunner:
             if self.log_dir is not None:
                 self.log(locals())
             if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                self.save(
+                    os.path.join(self.log_dir, 'model_{}.pt'.format(it)),
+                    iteration=it,
+                )
             ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
@@ -226,12 +230,12 @@ class HIMOnPolicyRunner:
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
 
-    def save(self, path, infos=None):
+    def save(self, path, infos=None, iteration=None):
         torch.save({
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'estimator_optimizer_state_dict': self.alg.actor_critic.estimator.optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
+            'iter': self.current_learning_iteration if iteration is None else iteration,
             'infos': infos,
             }, path)
 
@@ -242,6 +246,15 @@ class HIMOnPolicyRunner:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
             self.alg.actor_critic.estimator.optimizer.load_state_dict(loaded_dict['estimator_optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
+        # Older periodic checkpoints in this fork stored the stage's starting
+        # iteration in their metadata. The filename still carried the true
+        # iteration, so use it to recover safely when it is newer.
+        checkpoint_match = re.fullmatch(r"model_(\d+)\.pt", os.path.basename(path))
+        if checkpoint_match is not None:
+            filename_iteration = int(checkpoint_match.group(1))
+            self.current_learning_iteration = max(
+                self.current_learning_iteration, filename_iteration
+            )
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

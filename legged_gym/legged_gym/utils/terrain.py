@@ -98,7 +98,7 @@ class Terrain:
             (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
 
             terrain = terrain_utils.SubTerrain("terrain",
-                              width=self.width_per_env_pixels,
+                              width=self.length_per_env_pixels,
                               length=self.width_per_env_pixels,
                               vertical_scale=self.vertical_scale,
                               horizontal_scale=self.horizontal_scale)
@@ -108,34 +108,65 @@ class Terrain:
     
     def make_terrain(self, choice, difficulty):
         terrain = terrain_utils.SubTerrain(   "terrain",
-                                width=self.width_per_env_pixels,
+                                width=self.length_per_env_pixels,
                                 length=self.width_per_env_pixels,
                                 vertical_scale=self.cfg.vertical_scale,
                                 horizontal_scale=self.cfg.horizontal_scale)
+        geometry_scale = getattr(self.cfg, "geometry_scale", 1.0)
         slope = difficulty * 0.4
-        amplitude = 0.01 + 0.07 * difficulty
-        step_height = 0.05 + 0.18 * difficulty
-        discrete_obstacles_height = 0.05 + difficulty * 0.1
-        stepping_stones_size = 1.5 * (1.05 - difficulty)
-        stone_distance = 0.05 if difficulty==0 else 0.1
-        gap_size = 1. * difficulty
-        pit_depth = 1. * difficulty
-        if choice < self.proportions[0]:
+        amplitude = geometry_scale * (0.01 + 0.07 * difficulty)
+        step_height = geometry_scale * (0.05 + 0.18 * difficulty)
+        discrete_obstacles_height = geometry_scale * (0.05 + difficulty * 0.1)
+        stepping_stones_size = geometry_scale * 1.5 * (1.05 - difficulty)
+        stone_distance = geometry_scale * (0.05 if difficulty==0 else 0.1)
+        gap_size = geometry_scale * 1. * difficulty
+        pit_depth = geometry_scale * 1. * difficulty
+        platform_size = geometry_scale * 3.0
+        if getattr(self.cfg, "up_down_stairs", False):
+            height_range = getattr(self.cfg, "up_down_stair_height_range", None)
+            if height_range is None:
+                stair_height = self.cfg.up_down_stair_height
+            else:
+                stair_height = height_range[0] + difficulty * (
+                    height_range[1] - height_range[0]
+                )
+            up_down_stairs_terrain(
+                terrain,
+                step_width=geometry_scale * 0.30,
+                step_height=stair_height,
+                # Leave a longer flat approach and exit so oblique acceptance
+                # runs do not start or finish against a tile boundary.
+                start_distance=3.5,
+                num_steps=6,
+                top_width=geometry_scale * 0.9,
+                flat_width=geometry_scale * 2.5,
+            )
+        elif getattr(self.cfg, "continuous_uneven", False):
+            # Fill the complete tile, including the spawn region.  Difficulty
+            # levels 0..4 produce approximately 1..4 cm signed height relief.
+            terrain_utils.random_uniform_terrain(
+                terrain,
+                min_height=-amplitude,
+                max_height=amplitude,
+                step=0.005,
+                downsampled_scale=0.1,
+            )
+        elif choice < self.proportions[0]:
             if choice < self.proportions[0]/ 2:
                 slope *= -1
-            terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
+            terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=platform_size)
         elif choice < self.proportions[1]:
-            terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
+            terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=platform_size)
             terrain_utils.random_uniform_terrain(terrain, min_height=-amplitude, max_height=amplitude, step=0.005, downsampled_scale=0.2)
         elif choice < self.proportions[3]:
             if choice<self.proportions[2]:
                 step_height *= -1
-            terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.30, step_height=step_height, platform_size=3.)
+            terrain_utils.pyramid_stairs_terrain(terrain, step_width=geometry_scale * 0.30, step_height=step_height, platform_size=platform_size)
         elif choice < self.proportions[4]:
             num_rectangles = 20
-            rectangle_min_size = 1.
-            rectangle_max_size = 2.
-            terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size, rectangle_max_size, num_rectangles, platform_size=3.)
+            rectangle_min_size = geometry_scale * 1.
+            rectangle_max_size = geometry_scale * 2.
+            terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size, rectangle_max_size, num_rectangles, platform_size=platform_size)
         elif choice < self.proportions[5]:
             terrain_utils.stepping_stones_terrain(terrain, stone_size=stepping_stones_size, stone_distance=stone_distance, max_height=0., platform_size=4.)
         elif choice < self.proportions[6]:
@@ -155,14 +186,50 @@ class Terrain:
         end_y = self.border + (j + 1) * self.width_per_env_pixels
         self.height_field_raw[start_x: end_x, start_y:end_y] = terrain.height_field_raw
 
-        env_origin_x = (i + 0.5) * self.env_length
+        local_origin_x = getattr(self.cfg, "spawn_offset_x", None)
+        if local_origin_x is None:
+            local_origin_x = self.env_length / 2.
+        env_origin_x = i * self.env_length + local_origin_x
         env_origin_y = (j + 0.5) * self.env_width
-        x1 = int((self.env_length/2. - 1) / terrain.horizontal_scale)
-        x2 = int((self.env_length/2. + 1) / terrain.horizontal_scale)
+        x1 = max(0, int((local_origin_x - 1) / terrain.horizontal_scale))
+        x2 = min(terrain.width, int((local_origin_x + 1) / terrain.horizontal_scale))
         y1 = int((self.env_width/2. - 1) / terrain.horizontal_scale)
         y2 = int((self.env_width/2. + 1) / terrain.horizontal_scale)
         env_origin_z = np.max(terrain.height_field_raw[x1:x2, y1:y2])*terrain.vertical_scale
         self.env_origins[i, j] = [env_origin_x, env_origin_y, env_origin_z]
+
+def up_down_stairs_terrain(terrain, step_width, step_height, start_distance,
+                           num_steps, top_width, flat_width):
+    """Fill a tile with repeatable approach/up/platform/down/exit cycles."""
+    x_m = np.arange(terrain.width) * terrain.horizontal_scale
+    levels = np.zeros(terrain.width, dtype=np.int32)
+    up_length = num_steps * step_width
+    cycle_length = 2. * up_length + top_width + flat_width
+    active = x_m >= start_distance
+    phase = np.mod(x_m[active] - start_distance, cycle_length)
+
+    active_levels = np.zeros_like(phase, dtype=np.int32)
+    ascending = phase < up_length
+    active_levels[ascending] = np.minimum(
+        np.floor(phase[ascending] / step_width).astype(np.int32) + 1,
+        num_steps,
+    )
+    on_top = (phase >= up_length) & (phase < up_length + top_width)
+    active_levels[on_top] = num_steps
+    descending = (
+        (phase >= up_length + top_width)
+        & (phase < 2. * up_length + top_width)
+    )
+    active_levels[descending] = np.maximum(
+        num_steps - 1
+        - np.floor(
+            (phase[descending] - up_length - top_width) / step_width
+        ).astype(np.int32),
+        0,
+    )
+    levels[active] = active_levels
+    raw_step = int(np.round(step_height / terrain.vertical_scale))
+    terrain.height_field_raw[:, :] = (levels * raw_step)[:, None]
 
 def gap_terrain(terrain, gap_size, platform_size=1.):
     gap_size = int(gap_size / terrain.horizontal_scale)

@@ -41,6 +41,7 @@ class LeggedRobotCfg(BaseConfig):
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
         episode_length_s = 20 # episode length in seconds
+        enable_camera_sensors = False
 
     class terrain:
         mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
@@ -48,6 +49,10 @@ class LeggedRobotCfg(BaseConfig):
         vertical_scale = 0.005 # [m]
         border_size = 25 # [m]
         curriculum = True
+        # Optional yaw-safe curriculum metric.  When enabled, terrain
+        # progression uses velocity projected onto the instantaneous body-frame
+        # command instead of endpoint displacement from the spawn position.
+        curriculum_use_command_progress = False
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
@@ -58,8 +63,14 @@ class LeggedRobotCfg(BaseConfig):
         selected = False # select a unique terrain type and pass all arguments
         terrain_kwargs = None # Dict of arguments for selected terrain
         max_init_terrain_level = 5 # starting curriculum state
+        fixed_init_level = None # validation-only fixed curriculum row
+        spawn_offset_x = None # validation-only spawn position within a terrain tile
+        up_down_stairs = False # validation-only repeated stair course
+        up_down_stair_height = 0.04
+        up_down_stair_height_range = None # optional curriculum min/max
         terrain_length = 8.
         terrain_width = 8.
+        geometry_scale = 1.0 # robot-specific scaling for dimensional terrain features
         num_rows= 10 # number of terrain rows (levels)
         num_cols = 20 # number of terrain cols (types)
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
@@ -73,6 +84,9 @@ class LeggedRobotCfg(BaseConfig):
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
+        # Optional retention cohort for broad command envelopes.
+        forward_only_fraction = 0.0
+        forward_only_x_range = [0.2, 1.0]
         class ranges:
             lin_vel_x = [-1.0, 1.0] # min max [m/s]
             lin_vel_y = [-1.0, 1.0]   # min max [m/s]
@@ -98,6 +112,13 @@ class LeggedRobotCfg(BaseConfig):
         # decimation: Number of control action updates @ sim DT per policy DT
         decimation = 4
         hip_reduction = 1.0
+        # Optional actuator-output torque-speed envelope. Curve speeds remain
+        # in the source unit (rpm) and are converted at runtime.
+        use_torque_speed_envelope = False
+        torque_speed_curve_rpm = []
+        torque_speed_curve_nm = []
+        joint_gear_ratios = {}
+        transmission_efficiencies = {}
 
     class asset:
         file = ""
@@ -120,6 +141,9 @@ class LeggedRobotCfg(BaseConfig):
         max_linear_velocity = 1000.
         armature = 0.
         thickness = 0.01
+        # Validation-only multiplier for testing dependence on hard DOF speed
+        # limits. Training and normal evaluation keep the default value.
+        dof_velocity_limit_scale = 1.0
 
     class domain_rand:
         randomize_payload_mass = True
@@ -139,6 +163,10 @@ class LeggedRobotCfg(BaseConfig):
         
         randomize_motor_strength = True
         motor_strength_range = [0.9, 1.1]
+
+        # Keep legacy tasks correlated per robot. Robot-specific configs can
+        # opt into independently sampled factors for every actuated joint.
+        per_joint_randomization = False
         
         randomize_kp = True
         kp_range = [0.9, 1.1]
@@ -148,6 +176,17 @@ class LeggedRobotCfg(BaseConfig):
         
         randomize_initial_joint_pos = True
         initial_joint_pos_range = [0.5, 1.5]
+
+        randomize_joint_friction = False
+        joint_friction_range = [0.0, 0.0]
+
+        randomize_joint_damping = False
+        joint_damping_range = [0.0, 0.0]
+
+        observation_latency = False
+        observation_latency_range = [0.0, 0.0]  # milliseconds
+        observation_latency_min_probability = 0.0
+        observation_latency_max_probability = 0.0
         
         disturbance = True
         disturbance_range = [-30.0, 30.0]
