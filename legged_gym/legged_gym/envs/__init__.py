@@ -57,6 +57,18 @@ from legged_gym.envs.solo12.solo12_v3_1_config import (
     Solo12V31ObstacleCurriculumAConfig,
     Solo12V31ObstacleCurriculumBConfig,
     Solo12V31ObstacleCurriculumCConfig,
+    Solo12V31ObstacleMixedStabilityConfig,
+    Solo12V31ObstacleMixedStabilityHighStairConfig,
+    Solo12V31ObstacleMixedStabilityReplayConfig,
+    Solo12V31ArmatureAdaptConfig,
+    Solo12V31ArmatureReplayConfig,
+    Solo12V31ArmatureDeployNominalConfig,
+    Solo12V31ObstacleMixedStabilityFlatReplayConfig,
+    Solo12V31ObstacleHardReplayConfig,
+    Solo12V31ObstacleFocusedReplayConfig,
+    Solo12V31ObstacleTargetedReplayConfig,
+    Solo12V31TargetedFinetuneCfgPPO,
+    Solo12V31ObstacleBalancedReplayConfig,
     Solo12V31ObstacleFinalDynamicsConfig,
     Solo12V31ObstacleFinalLatency10Config,
     Solo12V31ObstacleFinalLatency15Config,
@@ -100,6 +112,17 @@ task_registry.register( "solo12_v3_1_formal_fullscene_final", LeggedRobot, Solo1
 task_registry.register( "solo12_v3_1_obstacle_a", LeggedRobot, Solo12V31ObstacleCurriculumAConfig(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_b", LeggedRobot, Solo12V31ObstacleCurriculumBConfig(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_c", LeggedRobot, Solo12V31ObstacleCurriculumCConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_mixed_stability", LeggedRobot, Solo12V31ObstacleMixedStabilityConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_mixed_stability_high_stair", LeggedRobot, Solo12V31ObstacleMixedStabilityHighStairConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_mixed_stability_replay", LeggedRobot, Solo12V31ObstacleMixedStabilityReplayConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_armature_adapt", LeggedRobot, Solo12V31ArmatureAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_armature_replay", LeggedRobot, Solo12V31ArmatureReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_armature_deploy_nominal", LeggedRobot, Solo12V31ArmatureDeployNominalConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_mixed_stability_flat_replay", LeggedRobot, Solo12V31ObstacleMixedStabilityFlatReplayConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_hard_replay", LeggedRobot, Solo12V31ObstacleHardReplayConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_focused_replay", LeggedRobot, Solo12V31ObstacleFocusedReplayConfig(), Solo12V31RoughCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_targeted_replay", LeggedRobot, Solo12V31ObstacleTargetedReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_obstacle_balanced_replay", LeggedRobot, Solo12V31ObstacleBalancedReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_final_dynamics", LeggedRobot, Solo12V31ObstacleFinalDynamicsConfig(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_final_latency10", LeggedRobot, Solo12V31ObstacleFinalLatency10Config(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_final_latency15", LeggedRobot, Solo12V31ObstacleFinalLatency15Config(), Solo12V31RoughCfgPPO() )

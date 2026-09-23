@@ -122,6 +122,39 @@ class Terrain:
         gap_size = geometry_scale * 1. * difficulty
         pit_depth = geometry_scale * 1. * difficulty
         platform_size = geometry_scale * 3.0
+        plane_mix = float(getattr(self.cfg, "mixed_plane_probability", 0.0))
+        if plane_mix > 0.0 and choice < plane_mix:
+            return terrain
+        if plane_mix > 0.0:
+            choice = (choice - plane_mix) / (1.0 - plane_mix)
+        stair_mix = float(getattr(self.cfg, "mixed_stair_probability", 0.0))
+        if stair_mix > 0.0 and choice < stair_mix:
+            height_range = getattr(self.cfg, "mixed_stair_height_range", None)
+            if height_range is None:
+                stair_height = self.cfg.up_down_stair_height
+            else:
+                stair_height = height_range[0] + difficulty * (height_range[1] - height_range[0])
+            up_down_stairs_terrain(
+                terrain, step_width=geometry_scale * 0.30,
+                step_height=stair_height, start_distance=3.5,
+                num_steps=6, top_width=geometry_scale * 0.9,
+                flat_width=geometry_scale * 2.5,
+            )
+            return terrain
+        if stair_mix > 0.0:
+            choice = (choice - stair_mix) / (1.0 - stair_mix)
+        continuous_mix = float(getattr(self.cfg, "mixed_continuous_uneven_probability", 0.0))
+        if continuous_mix > 0.0 and choice < continuous_mix:
+            terrain_utils.random_uniform_terrain(
+                terrain,
+                min_height=-amplitude,
+                max_height=amplitude,
+                step=0.005,
+                downsampled_scale=0.1,
+            )
+            return terrain
+        if continuous_mix > 0.0:
+            choice = (choice - continuous_mix) / (1.0 - continuous_mix)
         if getattr(self.cfg, "up_down_stairs", False):
             height_range = getattr(self.cfg, "up_down_stair_height_range", None)
             if height_range is None:

@@ -457,6 +457,17 @@ class LeggedRobot(BaseTask):
             [numpy.array]: Modified DOF properties
         """
         props["velocity"] *= self.cfg.asset.dof_velocity_limit_scale
+        if self.cfg.domain_rand.randomize_armature:
+            armature_ranges = self.cfg.domain_rand.armature_ranges
+            fallback_range = self.cfg.domain_rand.armature_range
+            zero_armature = np.random.random() < self.cfg.domain_rand.armature_zero_probability
+            for i, dof_name in enumerate(self.dof_names):
+                sample_range = fallback_range
+                for joint_family, family_range in armature_ranges.items():
+                    if joint_family in dof_name:
+                        sample_range = family_range
+                        break
+                props["armature"][i] = 0.0 if zero_armature else np.random.uniform(sample_range[0], sample_range[1])
         if env_id==0:
             self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.device, requires_grad=False)
             self.dof_vel_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)

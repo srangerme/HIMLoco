@@ -104,6 +104,10 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     if args.play_terrain == "plane":
         env_cfg.terrain.mesh_type = "plane"
     elif args.play_terrain == "stairs":
+        # Explicit acceptance terrain must bypass the training replay mix.
+        # Otherwise column 0 is consumed by mixed_plane_probability first.
+        env_cfg.terrain.mixed_plane_probability = 0.0
+        env_cfg.terrain.mixed_stair_probability = 0.0
         env_cfg.terrain.up_down_stairs = True
         env_cfg.terrain.continuous_uneven = False
         env_cfg.terrain.up_down_stair_height = args.stair_step_height
@@ -118,6 +122,8 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         # can make a short rollout look like an uneven-ground test even though
         # most of the motion happened on the platform.
         env_cfg.terrain.continuous_uneven = True
+        env_cfg.terrain.mixed_plane_probability = 0.0
+        env_cfg.terrain.mixed_stair_probability = 0.0
         env_cfg.terrain.spawn_offset_x = 2.0
         env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
         env_cfg.terrain.num_cols = 1

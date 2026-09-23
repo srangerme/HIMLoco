@@ -507,6 +507,130 @@ class Solo12V31ObstacleCurriculumCConfig(Solo12V31ObstacleCurriculumBConfig):
         swing_peak_clearance_target = 0.11
 
 
+class Solo12V31ObstacleMixedStabilityConfig(Solo12V31ObstacleCurriculumCConfig):
+    """Mixed replay: retain rough terrain while sampling 11.5--15 cm stairs."""
+
+    class terrain(Solo12V31ObstacleCurriculumCConfig.terrain):
+        mixed_stair_probability = 0.25
+        mixed_stair_height_range = [0.115, 0.15]
+
+
+class Solo12V31ObstacleMixedStabilityHighStairConfig(Solo12V31ObstacleMixedStabilityConfig):
+    """Mixed replay with a higher stair share for the 15 cm target."""
+
+    class terrain(Solo12V31ObstacleMixedStabilityConfig.terrain):
+        mixed_stair_probability = 0.40
+
+
+class Solo12V31ObstacleMixedStabilityReplayConfig(Solo12V31ObstacleMixedStabilityConfig):
+    """Replay mix with a small pure-plane share to prevent flat-gait forgetting."""
+
+    class terrain(Solo12V31ObstacleMixedStabilityConfig.terrain):
+        mixed_plane_probability = 0.10
+
+
+class Solo12V31ArmatureAdaptConfig(Solo12V31ObstacleMixedStabilityReplayConfig):
+    """Adapt 8040 to deployment armature without changing legacy damping/friction ranges."""
+
+    class domain_rand(Solo12V31ObstacleMixedStabilityReplayConfig.domain_rand):
+        randomize_armature = True
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.0, 0.02016],
+        }
+
+
+class Solo12V31ArmatureReplayConfig(Solo12V31ArmatureAdaptConfig):
+    """Retain the legacy zero-armature endpoint during armature adaptation."""
+
+    class domain_rand(Solo12V31ArmatureAdaptConfig.domain_rand):
+        armature_zero_probability = 0.25
+
+
+class Solo12V31ArmatureDeployNominalConfig(Solo12V31ArmatureAdaptConfig):
+    """Validation endpoint for deployment armature with legacy damping/friction ranges."""
+
+    class domain_rand(Solo12V31ArmatureAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0042, 0.0042],
+            "thigh": [0.0042, 0.0042],
+            "calf": [0.0168, 0.0168],
+        }
+
+
+class Solo12V31ObstacleMixedStabilityFlatReplayConfig(Solo12V31ObstacleMixedStabilityReplayConfig):
+    """Replay mix with extra plane samples for command robustness."""
+
+    class terrain(Solo12V31ObstacleMixedStabilityReplayConfig.terrain):
+        mixed_plane_probability = 0.20
+
+
+class Solo12V31ObstacleHardReplayConfig(Solo12V31ObstacleMixedStabilityReplayConfig):
+    """Hard-case replay used to improve 8040's high uneven/stair performance.
+
+    This changes terrain sampling only: the policy architecture, observations,
+    rewards, and dynamics randomization remain inherited from the validated
+    mixed-replay chain.
+    """
+
+    class terrain(Solo12V31ObstacleMixedStabilityReplayConfig.terrain):
+        max_init_terrain_level = 9
+        mixed_plane_probability = 0.15
+        mixed_stair_probability = 0.35
+        mixed_stair_height_range = [0.115, 0.149]
+
+
+class Solo12V31ObstacleFocusedReplayConfig(Solo12V31ObstacleHardReplayConfig):
+    """Stable hard replay with the full requested command-speed envelope."""
+
+    class terrain(Solo12V31ObstacleHardReplayConfig.terrain):
+        # Keep the validated level-7 reset distribution; do not jump directly
+        # to level 9, which caused the prior fine-tune to lose stability.
+        max_init_terrain_level = 7
+
+    class commands(Solo12V31ObstacleHardReplayConfig.commands):
+        curriculum = False
+        heading_command = False
+
+        class ranges(Solo12V31ObstacleHardReplayConfig.commands.ranges):
+            lin_vel_x = [-1.0, 1.0]
+            lin_vel_y = [-0.4, 0.4]
+            ang_vel_yaw = [-1.5, 1.5]
+
+
+class Solo12V31ObstacleTargetedReplayConfig(Solo12V31ObstacleFocusedReplayConfig):
+    """Replay the exact acceptance terrain families without changing policy I/O."""
+
+    class terrain(Solo12V31ObstacleFocusedReplayConfig.terrain):
+        max_init_terrain_level = 9
+        continuous_uneven = True
+        mixed_plane_probability = 0.15
+        mixed_stair_probability = 0.35
+        mixed_stair_height_range = [0.115, 0.149]
+
+
+class Solo12V31TargetedFinetuneCfgPPO(Solo12V31RoughCfgPPO):
+    """Conservative PPO settings for retaining 8040 while adapting terrain."""
+
+    class algorithm(Solo12V31RoughCfgPPO.algorithm):
+        learning_rate = 0.0002
+        entropy_coef = 0.003
+        desired_kl = 0.005
+
+
+class Solo12V31ObstacleBalancedReplayConfig(Solo12V31ObstacleFocusedReplayConfig):
+    """Incremental replay: add continuous uneven terrain without forgetting rough terrain."""
+
+    class terrain(Solo12V31ObstacleFocusedReplayConfig.terrain):
+        max_init_terrain_level = 7
+        continuous_uneven = False
+        mixed_plane_probability = 0.10
+        mixed_stair_probability = 0.25
+        mixed_continuous_uneven_probability = 0.35
+        mixed_stair_height_range = [0.115, 0.149]
+
+
 class Solo12V31ObstacleFinalConfig(Solo12V31ObstacleCurriculumCConfig):
     """Restore the full command and R6 randomization envelopes."""
 

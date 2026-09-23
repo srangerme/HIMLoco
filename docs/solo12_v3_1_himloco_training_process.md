@@ -1,13 +1,14 @@
 # Solo12 v3.1 HIMLoco 已完成训练过程
 
-本文记录最终模型 `model_7540.pt` 的有效训练链。只列出直接进入最终 checkpoint
-继承关系的训练，不包含接口试跑、参数探针、失败分支以及未被最终模型继承的实验。
+本文保留阶段模型 `model_7540.pt` 的有效训练链，并补充以已验收 `model_8040.pt`
+为基线的 armature 动力学适应过程。只列出直接进入所选 checkpoint 继承关系的训练，
+不包含接口试跑、参数探针、失败分支以及未被最终模型继承的实验。
 
-## 1. 最终模型
+## 1. 7540 阶段模型
 
 - 训练任务：`solo12_v3_1_obstacle_final_action_delay`
 - 训练 run：`Sep16_17-26-58_obstacle_final_action_delay_500it_seed1`
-- 最终选定 checkpoint：`model_7540.pt`
+- 该阶段选定 checkpoint：`model_7540.pt`
 - 基础无动作延迟 checkpoint：`model_7100.pt`
 - 目标机身高度：`0.32 m`
 - 策略周期：`20 ms`（仿真步长 `5 ms`，control decimation 为 4）
@@ -130,7 +131,7 @@
 训练运行到 `model_7600.pt`。对末段 9 个 checkpoint 在 19.9 cm 楼梯上筛选后，
 选择兼顾速度通过率和跌倒/重置次数的 `model_7540.pt`。
 
-## 10. 最终有效 checkpoint 继承链
+## 10. 7540 阶段有效 checkpoint 继承链
 
 ```text
 model_4320
@@ -146,7 +147,7 @@ model_4320
   -> action-delay training: model_7540
 ```
 
-## 11. 验收结果
+## 11. 7540 阶段验收结果
 
 验收使用 50 个并行环境、15 秒 rollout、`0.5 m/s` 前向命令和完整验收随机化。
 单个环境 15 秒平均前向速度不低于 `0.35 m/s` 时记为速度通过。
@@ -159,3 +160,63 @@ model_4320
 
 该模型通过当前仿真可行性门槛。19.9 cm 楼梯仍存在较多跌倒/重置，因此结果
 不应解释为该高度已经稳定准出；实机测试需要将其作为重点风险场景。
+
+## 12. 8040 后的 armature 动力学适应
+
+部署侧确认了非零 armature 后，以已验收的 `model_8040.pt` 为能力基线，只适应
+armature；关节 friction loss 和 damping 保持原训练范围，不改成部署 MJCF 的固定值。
+
+基线模型：
+
+- run：`Sep21_13-25-22_mixed_stability_replay_8020_to8080`
+- checkpoint：`model_8040.pt`
+
+第一段从 8040 使用 1024 个环境训练 500 iteration：
+
+- run：`Sep23_06-03-52_armature_only_adapt_8040_to8540`
+- friction loss：所有关节 `[0.0, 0.02]`
+- damping：所有关节 `[0.0, 0.01]`
+- hip/thigh armature：`[0.0, 0.00504]`
+- calf armature：`[0.0, 0.02016]`
+- 中间父 checkpoint：`model_8320.pt`
+- SHA-256：`7b5f7ac917bae5c925727756d47a0ec0732e4e74b18e42e8235ddbddb9d69812`
+
+连续均匀 armature 能改善部署端点，但精确 `armature=0` 在连续分布中的概率为零，
+旧动力学楼梯和不平整地面出现遗忘。因此没有继续使用该段后期 checkpoint，而是从
+8320 增加零端点 replay。
+
+第二段从 8320 使用 1024 个环境训练 200 iteration：
+
+- run：`Sep23_06-52-17_armature_zero25_replay_8320_to8520`
+- 25% 环境的全部关节固定 `armature=0`
+- 75% 环境继续在上述完整 armature 范围内采样
+- friction loss 和 damping 范围保持不变
+- 最终选定 checkpoint：`model_8520.pt`
+- SHA-256：`200a9be90b921b1dd783e8aaedb836ddc4d1db6ae0fd2ed6de2446a1539f74e7`
+
+1024 环境实例化检查得到 278 个完整零 armature 环境，占 27.15%；其余样本实际覆盖
+到 hip/thigh `0.005039/0.005035`、calf `0.020153`。实际 friction loss 覆盖
+`[0,0.02]`，damping 覆盖 `[0,0.01]`。
+
+## 13. 8520 动力学适应验收
+
+最终命令矩阵每个 case 使用 10 个环境、10 秒 rollout、seed 1。覆盖平地
+`0.3/1.0 m/s` 和组合命令，高难度不平整地面 `0.3/0.5/1.0 m/s` 和组合命令，
+以及 14.9 cm 楼梯 `0.3/0.7 m/s`。
+
+旧动力学回归：
+
+- 8040：9 个 case 平均通过率 0.900，平均速度比 0.806，共 11 次跌倒
+- 8520：9 个 case 平均通过率 0.878，平均速度比 0.888，共 10 次跌倒
+- 两者平地和 14.9 cm 楼梯均全部通过；8520 的总体稳定性与 8040 同一水平
+
+armature 适应：
+
+- 8040 在部署标称 armature 下：平均通过率 0.467，速度比 0.630，共 263 次跌倒
+- 8520 在部署标称 armature 下：平均通过率 0.867，速度比 0.877，共 9 次跌倒
+- 8520 在 25% 零端点加完整随机范围下：平均通过率 0.889，速度比 0.872，共 7 次跌倒
+- 8520 在标称和随机 armature 下的平地与 14.9 cm 楼梯均全部通过
+
+另对高难度不平整地面和 14.9 cm 楼梯做了三个 seed 的独立复测。最终选择 8520，
+不选择训练末端只是因为 checkpoint 更新更晚，也不采用已放弃的 damping/friction
+扩大分支。

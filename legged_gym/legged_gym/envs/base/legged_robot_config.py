@@ -183,6 +183,16 @@ class LeggedRobotCfg(BaseConfig):
         randomize_joint_damping = False
         joint_damping_range = [0.0, 0.0]
 
+        # Rotor/reflected inertia is a true DOF property, unlike the passive
+        # torque terms above. It is sampled independently for each environment
+        # when actors are created.
+        randomize_armature = False
+        armature_range = [0.0, 0.0]
+        armature_ranges = {}
+        # Preserve a discrete zero-armature endpoint when adapting a policy
+        # trained with no reflected rotor inertia.
+        armature_zero_probability = 0.0
+
         observation_latency = False
         observation_latency_range = [0.0, 0.0]  # milliseconds
         observation_latency_min_probability = 0.0
