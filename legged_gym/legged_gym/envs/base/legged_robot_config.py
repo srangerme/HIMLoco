@@ -53,6 +53,10 @@ class LeggedRobotCfg(BaseConfig):
         # progression uses velocity projected onto the instantaneous body-frame
         # command instead of endpoint displacement from the spawn position.
         curriculum_use_command_progress = False
+        # Directional obstacle courses (stairs and ramps) vary along world X.
+        # When enabled, curriculum promotion must use signed world-X progress,
+        # so turning sideways cannot be mistaken for solving the terrain.
+        curriculum_use_world_x_progress = False
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
@@ -68,6 +72,14 @@ class LeggedRobotCfg(BaseConfig):
         up_down_stairs = False # validation-only repeated stair course
         up_down_stair_height = 0.04
         up_down_stair_height_range = None # optional curriculum min/max
+        mixed_plane_probability = 0.0
+        mixed_stair_probability = 0.0
+        mixed_slope_probability = 0.0
+        mixed_slope_angle_range_deg = None
+        mixed_continuous_uneven_probability = 0.0
+        continuous_uneven = False
+        fixed_slope_angle_deg = None
+        slope_ramp_start_distance = None
         terrain_length = 8.
         terrain_width = 8.
         geometry_scale = 1.0 # robot-specific scaling for dimensional terrain features
@@ -117,8 +129,16 @@ class LeggedRobotCfg(BaseConfig):
         use_torque_speed_envelope = False
         torque_speed_curve_rpm = []
         torque_speed_curve_nm = []
+        # Optional per-joint-family curves. When populated, each entry is
+        # {"rpm": [...], "nm": [...]}; this takes precedence over the shared
+        # curve above for matching joints.
+        torque_speed_curves = {}
         joint_gear_ratios = {}
         transmission_efficiencies = {}
+        torque_speed_envelope_scale = 1.0
+        torque_speed_envelope_scales = {}
+        rated_motor_torque_nm = 0.0
+        rated_motor_torques_nm = {}
 
     class asset:
         file = ""
@@ -144,10 +164,20 @@ class LeggedRobotCfg(BaseConfig):
         # Validation-only multiplier for testing dependence on hard DOF speed
         # limits. Training and normal evaluation keep the default value.
         dof_velocity_limit_scale = 1.0
+        # Diagnostic-only multiplier. Normal training and deployment use 1.0.
+        dof_torque_limit_scale = 1.0
+        # Optional exact URDF-limit overrides selected by joint-name fragment.
+        dof_velocity_limits = {}
+        dof_torque_limits = {}
+        # Fixed actuator mass deltas selected by rigid-body-name fragment.
+        # Inertia is recomputed by Isaac Gym from the body's shapes.
+        body_mass_additions = {}
 
     class domain_rand:
         randomize_payload_mass = True
         payload_mass_range = [-1, 2]
+        payload_min_endpoint_probability = 0.0
+        payload_max_endpoint_probability = 0.0
 
         randomize_com_displacement = True
         com_displacement_range = [-0.05, 0.05]

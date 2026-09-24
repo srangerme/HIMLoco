@@ -143,6 +143,25 @@ class Terrain:
             return terrain
         if stair_mix > 0.0:
             choice = (choice - stair_mix) / (1.0 - stair_mix)
+        slope_mix = float(getattr(self.cfg, "mixed_slope_probability", 0.0))
+        if slope_mix > 0.0 and choice < slope_mix:
+            angle_range = getattr(self.cfg, "mixed_slope_angle_range_deg", None)
+            if angle_range is None:
+                angle_deg = 45.0
+            else:
+                # Curriculum rows use difficulty 0.0..0.9; make level 9 reach
+                # the requested upper endpoint exactly.
+                fraction = np.clip(difficulty / 0.9, 0.0, 1.0)
+                angle_deg = angle_range[0] + fraction * (
+                    angle_range[1] - angle_range[0]
+                )
+            start_distance = getattr(self.cfg, "slope_ramp_start_distance", None)
+            if start_distance is None:
+                start_distance = self.env_length / 2.0 + 1.1
+            inclined_ramp_terrain(terrain, angle_deg, start_distance)
+            return terrain
+        if slope_mix > 0.0:
+            choice = (choice - slope_mix) / (1.0 - slope_mix)
         continuous_mix = float(getattr(self.cfg, "mixed_continuous_uneven_probability", 0.0))
         if continuous_mix > 0.0 and choice < continuous_mix:
             terrain_utils.random_uniform_terrain(
@@ -155,7 +174,13 @@ class Terrain:
             return terrain
         if continuous_mix > 0.0:
             choice = (choice - continuous_mix) / (1.0 - continuous_mix)
-        if getattr(self.cfg, "up_down_stairs", False):
+        fixed_slope_angle = getattr(self.cfg, "fixed_slope_angle_deg", None)
+        if fixed_slope_angle is not None:
+            start_distance = getattr(self.cfg, "slope_ramp_start_distance", None)
+            if start_distance is None:
+                start_distance = 2.5
+            inclined_ramp_terrain(terrain, fixed_slope_angle, start_distance)
+        elif getattr(self.cfg, "up_down_stairs", False):
             height_range = getattr(self.cfg, "up_down_stair_height_range", None)
             if height_range is None:
                 stair_height = self.cfg.up_down_stair_height
@@ -263,6 +288,16 @@ def up_down_stairs_terrain(terrain, step_width, step_height, start_distance,
     levels[active] = active_levels
     raw_step = int(np.round(step_height / terrain.vertical_scale))
     terrain.height_field_raw[:, :] = (levels * raw_step)[:, None]
+
+
+def inclined_ramp_terrain(terrain, angle_deg, start_distance):
+    """Fill a tile with a flat approach followed by an exact uphill ramp."""
+    x_m = np.arange(terrain.width) * terrain.horizontal_scale
+    rise_m = np.maximum(x_m - start_distance, 0.0) * np.tan(
+        np.deg2rad(angle_deg)
+    )
+    raw_height = np.rint(rise_m / terrain.vertical_scale).astype(np.int16)
+    terrain.height_field_raw[:, :] = raw_height[:, None]
 
 def gap_terrain(terrain, gap_size, platform_size=1.):
     gap_size = int(gap_size / terrain.horizontal_scale)

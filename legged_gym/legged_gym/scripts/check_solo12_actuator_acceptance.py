@@ -6,19 +6,27 @@ import json
 import numpy as np
 
 
-# RS02 maximum overload test at 25 C and 24 rpm. Values are actuator-output
-# torque, not Solo calf-joint torque. Unlisted values use the next higher
-# torque band instead of an invented interpolation.
-OVERLOAD_BANDS = (
-    (6.0, 6.5, 3000.0),
-    (6.5, 7.0, 1000.0),
-    (7.0, 9.0, 370.0),
-    (9.0, 11.0, 100.0),
-    (11.0, 13.0, 35.0),
-    (13.0, 15.0, 18.0),
-    (15.0, 17.0, 10.0),
+# RS02 manual (2026-07-13), stall overload test. Values are actuator-output
+# torque, not Solo calf-joint torque. The stall limits are more conservative
+# than the rotating test; unlisted values use the next higher torque point.
+RS02_OVERLOAD_BANDS = (
+    (6.0, 7.0, 867.0),
+    (7.0, 9.0, 174.0),
+    (9.0, 11.0, 40.0),
+    (11.0, 13.0, 22.0),
+    (13.0, 15.0, 10.0),
+    (15.0, 17.0, 6.0),
 )
-ACTUATOR_HARD_SPEED_RAD_S = 44.0
+RS06_OVERLOAD_BANDS = (
+    (11.0, 13.0, 1360.0),
+    (13.0, 15.0, 280.0),
+    (15.0, 18.0, 70.0),
+    (18.0, 23.0, 21.0),
+    (23.0, 28.0, 11.0),
+    (28.0, 32.0, 8.0),
+    (32.0, 34.0, 6.0),
+    (34.0, 36.0, 5.0),
+)
 
 
 def _as_rollouts(values, name):
@@ -80,6 +88,8 @@ def check_trace(
     raised_limit_trace=None,
     max_tracking_delta=0.05,
     max_forward_velocity_delta=0.05,
+    rated_torque_nm=None,
+    min_rated_fraction=0.95,
 ):
     joint_torque = _as_rollouts(trace["joint_torque_nm"], "joint_torque_nm")
     joint_velocity = _as_rollouts(
@@ -108,38 +118,84 @@ def check_trace(
     if len(dof_names) != num_joints:
         raise ValueError("dof_names length does not match trace")
 
-    gear_ratio = np.asarray([2.0 if "calf" in name else 1.0 for name in dof_names])
+    gear_ratio = np.asarray(
+        trace["joint_gear_ratios"]
+        if "joint_gear_ratios" in trace
+        else [2.0 if "calf" in name else 1.0 for name in dof_names],
+        dtype=float,
+    ).reshape(-1)
+    if gear_ratio.size != num_joints:
+        raise ValueError("joint_gear_ratios length does not match trace")
     motor_torque = np.abs(joint_torque) / gear_ratio[None, None, :]
     motor_speed = np.abs(joint_velocity) * gear_ratio[None, None, :]
 
+    if rated_torque_nm is not None:
+        rated_torques_nm = np.full(num_joints, rated_torque_nm, dtype=float)
+    elif "rated_motor_torques_nm" in trace:
+        rated_torques_nm = np.asarray(trace["rated_motor_torques_nm"], dtype=float).reshape(-1)
+    else:
+        legacy_rated = float(np.asarray(trace["rated_motor_torque_nm"]).reshape(())) \
+            if "rated_motor_torque_nm" in trace else 6.0
+        rated_torques_nm = np.full(num_joints, legacy_rated, dtype=float)
+    if rated_torques_nm.size != num_joints:
+        raise ValueError("rated_motor_torques_nm length does not match trace")
+    below_rated = motor_torque < rated_torques_nm[None, None, :]
+    per_joint_rated_fraction = np.mean(below_rated, axis=(0, 1))
+    rated_passed = bool(
+        np.mean(below_rated) >= min_rated_fraction
+        and np.all(per_joint_rated_fraction >= min_rated_fraction)
+    )
+    rated = {
+        "rated_motor_torques_nm": {
+            name: float(value) for name, value in zip(dof_names, rated_torques_nm)
+        },
+        "minimum_required_fraction": min_rated_fraction,
+        "comparison": "strictly_less_than",
+        "overall_fraction": float(np.mean(below_rated)),
+        "per_joint_fraction": {
+            name: float(fraction)
+            for name, fraction in zip(dof_names, per_joint_rated_fraction)
+        },
+        "passed": rated_passed,
+    }
+
     overload = []
     overload_passed = True
-    for lower_nm, upper_nm, allowed_s in OVERLOAD_BANDS:
-        metrics = _duration_metrics(
-            (motor_torque > lower_nm) & (motor_torque <= upper_nm), done, dt_s
-        )
-        metrics.update(
-            {
+    peak_torques_nm = np.asarray([36.0 if "calf" in name else 17.0 for name in dof_names])
+    for joint_id, name in enumerate(dof_names):
+        bands = RS06_OVERLOAD_BANDS if "calf" in name else RS02_OVERLOAD_BANDS
+        for lower_nm, upper_nm, allowed_s in bands:
+            metrics = _duration_metrics(
+                ((motor_torque[..., joint_id:joint_id + 1] > lower_nm)
+                 & (motor_torque[..., joint_id:joint_id + 1] <= upper_nm)),
+                done,
+                dt_s,
+            )
+            metrics.update({
+                "joint": name,
                 "motor_torque_band_nm": f"({lower_nm}, {upper_nm}]",
                 "allowed_s": allowed_s,
                 "passed": metrics["max_continuous_s"] <= allowed_s
                 and metrics["max_episode_accumulated_s"] <= allowed_s,
-            }
-        )
-        overload_passed &= metrics["passed"]
-        overload.append(metrics)
+            })
+            overload_passed &= metrics["passed"]
+            overload.append(metrics)
 
-    peak_exceeded = bool(np.any(motor_torque > 17.0 + envelope_tolerance_nm))
+    peak_exceeded = bool(np.any(
+        motor_torque > peak_torques_nm[None, None, :] + envelope_tolerance_nm
+    ))
     overload_passed &= not peak_exceeded
 
-    velocity_limit_scale = float(
-        np.asarray(trace["velocity_limit_scale"]).reshape(())
-        if "velocity_limit_scale" in trace
-        else 1.0
-    )
-    hard_joint_speed = (
-        ACTUATOR_HARD_SPEED_RAD_S * velocity_limit_scale / gear_ratio
-    )
+    if "hard_joint_speed_rad_s" in trace:
+        hard_joint_speed = np.asarray(trace["hard_joint_speed_rad_s"], dtype=float).reshape(-1)
+    else:
+        velocity_limit_scale = float(
+            np.asarray(trace["velocity_limit_scale"]).reshape(())
+            if "velocity_limit_scale" in trace else 1.0
+        )
+        hard_joint_speed = 44.0 * velocity_limit_scale / gear_ratio
+    if hard_joint_speed.size != num_joints:
+        raise ValueError("hard_joint_speed_rad_s length does not match trace")
     normalized_speed = np.abs(joint_velocity) / hard_joint_speed[None, None, :]
     near_hard_limit = normalized_speed >= 0.90
     hard_limit_hit = normalized_speed >= 0.99
@@ -199,12 +255,18 @@ def check_trace(
         envelope_passed = envelope["passed"]
 
     return {
-        "source_conditions": "RS02 manual overload test: 25 C, 24 rpm",
-        "calf_external_ratio": 2.0,
+        "source_conditions": "RS02 stall and RS06 rotating overload limits from manufacturer manuals",
+        "joint_gear_ratios": {
+            name: float(value) for name, value in zip(dof_names, gear_ratio)
+        },
         "transmission_efficiency": 1.0,
+        "rated_torque": rated,
         "overload": {
             "bands": overload,
-            "above_17_nm": peak_exceeded,
+            "above_scaled_peak": peak_exceeded,
+            "peak_motor_torques_nm": {
+                name: float(value) for name, value in zip(dof_names, peak_torques_nm)
+            },
             "passed": overload_passed,
         },
         "torque_speed_envelope": envelope,
@@ -216,7 +278,7 @@ def check_trace(
             "passed": hard_passed,
             "raised_limit_ab_test": raised_limit_ab,
         },
-        "overall_passed": overload_passed and envelope_passed and hard_passed,
+        "overall_passed": rated_passed and overload_passed and envelope_passed and hard_passed,
         "samples": steps * num_envs * num_joints,
         "motor_peak_speed_rad_s": float(motor_speed.max()),
     }
@@ -232,6 +294,12 @@ def main():
     parser.add_argument("--raised-limit-trace", help="Matching rollout with a raised hard velocity limit")
     parser.add_argument("--max-tracking-delta", type=float, default=0.05)
     parser.add_argument("--max-forward-velocity-delta", type=float, default=0.05)
+    parser.add_argument(
+        "--rated-torque-nm",
+        type=float,
+        help="Override the trace's rated torque; defaults to trace metadata or 6 Nm.",
+    )
+    parser.add_argument("--min-rated-fraction", type=float, default=0.95)
     args = parser.parse_args()
 
     with np.load(args.trace, allow_pickle=False) as trace:
@@ -245,6 +313,8 @@ def main():
                     raised_trace,
                     args.max_tracking_delta,
                     args.max_forward_velocity_delta,
+                    args.rated_torque_nm,
+                    args.min_rated_fraction,
                 )
         else:
             report = check_trace(
@@ -252,6 +322,8 @@ def main():
                 args.max_hard_hit_fraction,
                 args.max_hard_hit_duration_s,
                 args.envelope_tolerance_nm,
+                rated_torque_nm=args.rated_torque_nm,
+                min_rated_fraction=args.min_rated_fraction,
             )
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     print(rendered)

@@ -99,6 +99,24 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             args.acceptance_restitution,
             args.acceptance_restitution,
         ]
+    if args.acceptance_friction is not None:
+        if args.acceptance_friction <= 0.0:
+            raise ValueError("--acceptance_friction must be positive")
+        env_cfg.domain_rand.randomize_friction = True
+        env_cfg.domain_rand.friction_range = [
+            args.acceptance_friction,
+            args.acceptance_friction,
+        ]
+    if args.acceptance_payload_kg is not None:
+        if args.acceptance_payload_kg < 0.0:
+            raise ValueError("--acceptance_payload_kg must be non-negative")
+        env_cfg.domain_rand.randomize_payload_mass = True
+        env_cfg.domain_rand.payload_mass_range = [
+            args.acceptance_payload_kg,
+            args.acceptance_payload_kg,
+        ]
+        env_cfg.domain_rand.payload_min_endpoint_probability = 0.0
+        env_cfg.domain_rand.payload_max_endpoint_probability = 0.0
     env_cfg.commands.heading_command = False
     env_cfg.asset.dof_velocity_limit_scale = args.velocity_limit_scale
     if args.play_terrain == "plane":
@@ -108,14 +126,16 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         # Otherwise column 0 is consumed by mixed_plane_probability first.
         env_cfg.terrain.mixed_plane_probability = 0.0
         env_cfg.terrain.mixed_stair_probability = 0.0
+        env_cfg.terrain.mixed_slope_probability = 0.0
+        env_cfg.terrain.mixed_continuous_uneven_probability = 0.0
         env_cfg.terrain.up_down_stairs = True
         env_cfg.terrain.continuous_uneven = False
         env_cfg.terrain.up_down_stair_height = args.stair_step_height
         env_cfg.terrain.spawn_offset_x = 1.5
         env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
         env_cfg.terrain.num_cols = 1
-        env_cfg.viewer.pos = [0.0, -1.25, 0.58]
-        env_cfg.viewer.lookat = [0.25, 0.0, 0.20]
+        env_cfg.viewer.pos = [-1.20, -1.80, 0.90]
+        env_cfg.viewer.lookat = [0.60, 0.0, 0.35]
     elif args.play_terrain == "uneven":
         # Acceptance-only continuous random height field.  The standard
         # discrete-obstacle generator leaves a 3 m flat spawn platform, which
@@ -124,13 +144,37 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         env_cfg.terrain.continuous_uneven = True
         env_cfg.terrain.mixed_plane_probability = 0.0
         env_cfg.terrain.mixed_stair_probability = 0.0
+        env_cfg.terrain.mixed_slope_probability = 0.0
+        env_cfg.terrain.mixed_continuous_uneven_probability = 0.0
         env_cfg.terrain.spawn_offset_x = 2.0
         env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
         env_cfg.terrain.num_cols = 1
         env_cfg.viewer.pos = [0.0, -1.40, 0.65]
         env_cfg.viewer.lookat = [0.25, 0.0, 0.20]
+    elif args.play_terrain == "slope":
+        if not 0.0 < args.slope_angle_deg < 90.0:
+            raise ValueError("--slope_angle_deg must be between 0 and 90")
+        env_cfg.terrain.mixed_plane_probability = 0.0
+        env_cfg.terrain.mixed_stair_probability = 0.0
+        env_cfg.terrain.mixed_slope_probability = 0.0
+        env_cfg.terrain.mixed_continuous_uneven_probability = 0.0
+        env_cfg.terrain.up_down_stairs = False
+        env_cfg.terrain.continuous_uneven = False
+        env_cfg.terrain.fixed_slope_angle_deg = args.slope_angle_deg
+        env_cfg.terrain.slope_ramp_start_distance = 2.5
+        env_cfg.terrain.spawn_offset_x = 1.0
+        env_cfg.terrain.num_cols = 1
+        # Preserve a 45-degree surface during heightfield-to-mesh conversion.
+        env_cfg.terrain.slope_treshold = max(
+            env_cfg.terrain.slope_treshold,
+            np.tan(np.deg2rad(args.slope_angle_deg)) + 0.05,
+        )
+        env_cfg.viewer.pos = [-1.50, -1.80, 1.00]
+        env_cfg.viewer.lookat = [0.60, 0.0, 0.40]
     elif args.play_terrain != "rough":
-        raise ValueError("--play_terrain must be 'rough', 'stairs', 'uneven', or 'plane'")
+        raise ValueError(
+            "--play_terrain must be 'rough', 'stairs', 'uneven', 'slope', or 'plane'"
+        )
     if env_cfg.terrain.mesh_type not in ("plane", "none"):
         travel_seconds = args.video_seconds if args.video_path else args.rollout_seconds
         world_x_vel = x_vel * np.cos(initial_yaw_rad) - y_vel * np.sin(initial_yaw_rad)
@@ -182,6 +226,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     if args.acceptance_trace:
         acceptance_trace = {
             "joint_torque_nm": [],
+            "commanded_joint_torque_nm": [],
             "joint_velocity_rad_s": [],
             "dynamic_torque_limit_nm": [],
             "base_height_m": [],
@@ -199,6 +244,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             "terrain_level": [],
             "terrain_type": [],
             "done": [],
+            "payload_mass_kg": [],
         }
 
     video_process = None
@@ -275,6 +321,9 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             acceptance_trace["joint_torque_nm"].append(
                 env.actuator_torques.detach().cpu().numpy().copy()
             )
+            acceptance_trace["commanded_joint_torque_nm"].append(
+                env.commanded_actuator_torques.detach().cpu().numpy().copy()
+            )
             acceptance_trace["joint_velocity_rad_s"].append(
                 env.dof_vel.detach().cpu().numpy().copy()
             )
@@ -337,6 +386,9 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
                 terrain_type.detach().cpu().numpy().copy()
             )
             acceptance_trace["done"].append(dones.detach().cpu().numpy().copy())
+            acceptance_trace["payload_mass_kg"].append(
+                env.payload.detach().cpu().numpy().copy()
+            )
 
         if RECORD_FRAMES:
             if i % 2:
@@ -380,6 +432,9 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         np.savez_compressed(
             trace_path,
             joint_torque_nm=np.asarray(acceptance_trace["joint_torque_nm"]),
+            commanded_joint_torque_nm=np.asarray(
+                acceptance_trace["commanded_joint_torque_nm"]
+            ),
             joint_velocity_rad_s=np.asarray(acceptance_trace["joint_velocity_rad_s"]),
             dynamic_torque_limit_nm=np.asarray(acceptance_trace["dynamic_torque_limit_nm"]),
             base_height_m=np.asarray(acceptance_trace["base_height_m"]),
@@ -397,12 +452,25 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             terrain_level=np.asarray(acceptance_trace["terrain_level"]),
             terrain_type=np.asarray(acceptance_trace["terrain_type"]),
             done=np.asarray(acceptance_trace["done"]),
+            payload_mass_kg=np.asarray(acceptance_trace["payload_mass_kg"]),
             dt_s=np.asarray(env.dt),
             dof_names=np.asarray(env.dof_names),
             foot_names=np.asarray(env.feet_names),
             velocity_limit_scale=np.asarray(args.velocity_limit_scale),
+            torque_speed_envelope_scale=np.asarray(
+                env_cfg.control.torque_speed_envelope_scale
+            ),
+            rated_motor_torque_nm=np.asarray(
+                env_cfg.control.rated_motor_torque_nm
+            ),
+            rated_motor_torques_nm=env.rated_motor_torques_nm.detach().cpu().numpy(),
+            joint_gear_ratios=env.joint_gear_ratios.detach().cpu().numpy(),
+            hard_joint_speed_rad_s=env.dof_vel_limits.detach().cpu().numpy(),
             base_height_target_m=np.asarray(env_cfg.rewards.base_height_target),
             acceptance_randomization=np.asarray(args.acceptance_randomization),
+            acceptance_payload_kg=np.asarray(
+                -1.0 if args.acceptance_payload_kg is None else args.acceptance_payload_kg
+            ),
             acceptance_latency_ms=np.asarray(
                 -1.0 if args.acceptance_latency_ms is None else args.acceptance_latency_ms
             ),

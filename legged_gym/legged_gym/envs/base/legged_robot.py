@@ -457,6 +457,14 @@ class LeggedRobot(BaseTask):
             [numpy.array]: Modified DOF properties
         """
         props["velocity"] *= self.cfg.asset.dof_velocity_limit_scale
+        props["effort"] *= self.cfg.asset.dof_torque_limit_scale
+        for i, dof_name in enumerate(self.dof_names):
+            for joint_family, limit in self.cfg.asset.dof_velocity_limits.items():
+                if joint_family in dof_name:
+                    props["velocity"][i] = limit
+            for joint_family, limit in self.cfg.asset.dof_torque_limits.items():
+                if joint_family in dof_name:
+                    props["effort"][i] = limit
         if self.cfg.domain_rand.randomize_armature:
             armature_ranges = self.cfg.domain_rand.armature_ranges
             fallback_range = self.cfg.domain_rand.armature_range
@@ -504,7 +512,34 @@ class LeggedRobot(BaseTask):
                 scale = np.random.uniform(rng[0], rng[1])
                 props[i].mass = scale * self.default_rigid_body_mass[i]
 
+        for i, body_name in enumerate(self.body_names):
+            for body_family, addition_kg in self.cfg.asset.body_mass_additions.items():
+                if body_family in body_name:
+                    props[i].mass += addition_kg
+
         return props
+
+    def _sample_payloads(self):
+        """Sample payload mass with optional exact endpoint replay."""
+        rng = self.cfg.domain_rand.payload_mass_range
+        payload = torch_rand_float(
+            rng[0], rng[1], (self.num_envs, 1), device=self.device
+        )
+        min_probability = self.cfg.domain_rand.payload_min_endpoint_probability
+        max_probability = self.cfg.domain_rand.payload_max_endpoint_probability
+        if min_probability < 0.0 or max_probability < 0.0:
+            raise ValueError("payload endpoint probabilities must be non-negative")
+        if min_probability + max_probability > 1.0:
+            raise ValueError("payload endpoint probabilities must sum to at most one")
+        selector = torch.rand(self.num_envs, 1, device=self.device)
+        payload = torch.where(selector < min_probability, rng[0], payload)
+        payload = torch.where(
+            (selector >= min_probability)
+            & (selector < min_probability + max_probability),
+            rng[1],
+            payload,
+        )
+        return payload
     
     def _post_physics_step_callback(self):
         """ Callback called before computing terminations, rewards, and observations
@@ -595,6 +630,7 @@ class LeggedRobot(BaseTask):
         else:
             raise NameError(f"Unknown controller type: {control_type}")
         torques = self.motor_strength_factors * commanded_torques
+        self.commanded_actuator_torques = torques.clone()
         if self.cfg.control.use_torque_speed_envelope:
             self.dynamic_torque_limits = self._compute_torque_speed_limits()
             torques = torch.clamp(
@@ -611,31 +647,48 @@ class LeggedRobot(BaseTask):
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
     def _compute_torque_speed_limits(self):
-        """Interpolate an actuator-output T-N curve and return joint limits."""
+        """Interpolate actuator-output T-N curves and return joint limits."""
         speed_rpm = (
             torch.abs(self.dof_vel)
             * self.joint_gear_ratios
             * (60.0 / (2.0 * np.pi))
         )
-        upper = torch.searchsorted(self.torque_speed_curve_rpm, speed_rpm)
-        upper = torch.clamp(upper, 1, self.torque_speed_curve_rpm.numel() - 1)
-        lower = upper - 1
-
-        lower_speed = self.torque_speed_curve_rpm[lower]
-        upper_speed = self.torque_speed_curve_rpm[upper]
-        lower_torque = self.torque_speed_curve_nm[lower]
-        upper_torque = self.torque_speed_curve_nm[upper]
-        fraction = torch.clamp(
-            (speed_rpm - lower_speed) / (upper_speed - lower_speed),
-            0.0,
-            1.0,
-        )
-        motor_limits = lower_torque + fraction * (upper_torque - lower_torque)
-        motor_limits = torch.where(
-            speed_rpm >= self.torque_speed_curve_rpm[-1],
-            torch.zeros_like(motor_limits),
-            motor_limits,
-        )
+        motor_limits = torch.zeros_like(speed_rpm)
+        matched = torch.zeros(self.num_dof, dtype=torch.bool, device=self.device)
+        for joint_family, (curve_rpm, curve_nm) in self.torque_speed_curves.items():
+            joint_indices = torch.tensor(
+                [i for i, name in enumerate(self.dof_names) if joint_family in name],
+                dtype=torch.long,
+                device=self.device,
+            )
+            if joint_indices.numel() == 0:
+                continue
+            family_speed = speed_rpm[:, joint_indices]
+            upper = torch.searchsorted(curve_rpm, family_speed)
+            upper = torch.clamp(upper, 1, curve_rpm.numel() - 1)
+            lower = upper - 1
+            lower_speed = curve_rpm[lower]
+            upper_speed = curve_rpm[upper]
+            lower_torque = curve_nm[lower]
+            upper_torque = curve_nm[upper]
+            fraction = torch.clamp(
+                (family_speed - lower_speed) / (upper_speed - lower_speed),
+                0.0,
+                1.0,
+            )
+            family_limits = lower_torque + fraction * (upper_torque - lower_torque)
+            family_limits = torch.where(
+                family_speed >= curve_rpm[-1],
+                torch.zeros_like(family_limits),
+                family_limits,
+            )
+            motor_limits[:, joint_indices] = family_limits
+            matched[joint_indices] = True
+        if not bool(torch.all(matched)):
+            missing = [name for i, name in enumerate(self.dof_names) if not matched[i]]
+            raise ValueError(f"no torque-speed curve configured for joints: {missing}")
+        motor_limits *= self.cfg.control.torque_speed_envelope_scale
+        motor_limits *= self.torque_speed_envelope_scales
         joint_limits = (
             motor_limits
             * self.joint_gear_ratios
@@ -711,7 +764,16 @@ class LeggedRobot(BaseTask):
         if not self.init_done:
             # don't change on initial reset
             return
-        if self.cfg.terrain.curriculum_use_command_progress:
+        use_world_x_progress = getattr(
+            self.cfg.terrain, "curriculum_use_world_x_progress", False
+        )
+        if use_world_x_progress:
+            distance = self.root_states[env_ids, 0] - self.env_origins[env_ids, 0]
+            required_distance = (
+                torch.clamp(self.commands[env_ids, 0], min=0.0)
+                * self.max_episode_length_s
+            )
+        elif self.cfg.terrain.curriculum_use_command_progress:
             distance = self.episode_command_progress[env_ids]
             required_distance = self.episode_command_distance[env_ids]
         else:
@@ -722,7 +784,7 @@ class LeggedRobot(BaseTask):
                 torch.norm(self.commands[env_ids, :2], dim=1)
                 * self.max_episode_length_s
             )
-        if self.cfg.terrain.curriculum_use_command_progress:
+        if use_world_x_progress or self.cfg.terrain.curriculum_use_command_progress:
             # A partial traversal followed by a fall is not a solved terrain.
             # Promote only timeout-complete episodes and demote every early
             # termination.  This keeps the path-based metric from racing to
@@ -822,6 +884,7 @@ class LeggedRobot(BaseTask):
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actuator_torques = torch.zeros_like(self.torques)
+        self.commanded_actuator_torques = torch.zeros_like(self.torques)
         self.p_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
@@ -906,6 +969,15 @@ class LeggedRobot(BaseTask):
 
         self.joint_gear_ratios = torch.ones(self.num_dof, dtype=torch.float, device=self.device)
         self.transmission_efficiencies = torch.ones(self.num_dof, dtype=torch.float, device=self.device)
+        self.torque_speed_envelope_scales = torch.ones(
+            self.num_dof, dtype=torch.float, device=self.device
+        )
+        self.rated_motor_torques_nm = torch.full(
+            (self.num_dof,),
+            float(self.cfg.control.rated_motor_torque_nm),
+            dtype=torch.float,
+            device=self.device,
+        )
         for i, name in enumerate(self.dof_names):
             for joint_name, ratio in self.cfg.control.joint_gear_ratios.items():
                 if joint_name in name:
@@ -913,22 +985,40 @@ class LeggedRobot(BaseTask):
             for joint_name, efficiency in self.cfg.control.transmission_efficiencies.items():
                 if joint_name in name:
                     self.transmission_efficiencies[i] = efficiency
+            for joint_name, rated_nm in self.cfg.control.rated_motor_torques_nm.items():
+                if joint_name in name:
+                    self.rated_motor_torques_nm[i] = rated_nm
+            for joint_name, scale in self.cfg.control.torque_speed_envelope_scales.items():
+                if joint_name in name:
+                    self.torque_speed_envelope_scales[i] = scale
         self.dynamic_torque_limits = self.torque_limits.unsqueeze(0).repeat(self.num_envs, 1)
         if self.cfg.control.use_torque_speed_envelope:
-            curve_rpm = self.cfg.control.torque_speed_curve_rpm
-            curve_nm = self.cfg.control.torque_speed_curve_nm
-            if len(curve_rpm) < 2 or len(curve_rpm) != len(curve_nm):
-                raise ValueError("torque-speed curve must contain matching speed and torque points")
-            if any(b <= a for a, b in zip(curve_rpm, curve_rpm[1:])):
-                raise ValueError("torque-speed curve speeds must be strictly increasing")
-            if any(torque < 0.0 for torque in curve_nm):
-                raise ValueError("torque-speed curve limits must be non-negative")
-            self.torque_speed_curve_rpm = torch.tensor(
-                curve_rpm, dtype=torch.float, device=self.device
-            )
-            self.torque_speed_curve_nm = torch.tensor(
-                curve_nm, dtype=torch.float, device=self.device
-            )
+            curves = self.cfg.control.torque_speed_curves or {
+                "joint": {
+                    "rpm": self.cfg.control.torque_speed_curve_rpm,
+                    "nm": self.cfg.control.torque_speed_curve_nm,
+                }
+            }
+            self.torque_speed_curves = {}
+            for joint_family, curve in curves.items():
+                curve_rpm = curve["rpm"]
+                curve_nm = curve["nm"]
+                if len(curve_rpm) < 2 or len(curve_rpm) != len(curve_nm):
+                    raise ValueError(
+                        f"{joint_family} torque-speed curve must contain matching points"
+                    )
+                if any(b <= a for a, b in zip(curve_rpm, curve_rpm[1:])):
+                    raise ValueError(
+                        f"{joint_family} torque-speed speeds must be strictly increasing"
+                    )
+                if any(torque < 0.0 for torque in curve_nm):
+                    raise ValueError(
+                        f"{joint_family} torque-speed limits must be non-negative"
+                    )
+                self.torque_speed_curves[joint_family] = (
+                    torch.tensor(curve_rpm, dtype=torch.float, device=self.device),
+                    torch.tensor(curve_nm, dtype=torch.float, device=self.device),
+                )
         
         
         #randomize kp, kd, motor strength
@@ -953,7 +1043,7 @@ class LeggedRobot(BaseTask):
         if self.cfg.domain_rand.randomize_joint_damping:
             self.joint_damping_coeffs = torch_rand_float(self.cfg.domain_rand.joint_damping_range[0], self.cfg.domain_rand.joint_damping_range[1], (self.num_envs, self.num_actions), device=self.device)
         if self.cfg.domain_rand.randomize_payload_mass:
-            self.payload = torch_rand_float(self.cfg.domain_rand.payload_mass_range[0], self.cfg.domain_rand.payload_mass_range[1], (self.num_envs, 1), device=self.device)
+            self.payload = self._sample_payloads()
         if self.cfg.domain_rand.randomize_com_displacement:
             self.com_displacement = torch_rand_float(self.cfg.domain_rand.com_displacement_range[0], self.cfg.domain_rand.com_displacement_range[1], (self.num_envs, 3), device=self.device)
             
@@ -1082,6 +1172,7 @@ class LeggedRobot(BaseTask):
 
         # save body names from the asset
         body_names = self.gym.get_asset_rigid_body_names(robot_asset)
+        self.body_names = body_names
         self.dof_names = self.gym.get_asset_dof_names(robot_asset)
         self.num_bodies = len(body_names)
         self.num_dofs = len(self.dof_names)
@@ -1110,7 +1201,7 @@ class LeggedRobot(BaseTask):
         self.payload = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
         self.com_displacement = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
         if self.cfg.domain_rand.randomize_payload_mass:
-            self.payload = torch_rand_float(self.cfg.domain_rand.payload_mass_range[0], self.cfg.domain_rand.payload_mass_range[1], (self.num_envs, 1), device=self.device)
+            self.payload = self._sample_payloads()
         if self.cfg.domain_rand.randomize_com_displacement:
             self.com_displacement = torch_rand_float(self.cfg.domain_rand.com_displacement_range[0], self.cfg.domain_rand.com_displacement_range[1], (self.num_envs, 3), device=self.device)
             
@@ -1397,6 +1488,23 @@ class LeggedRobot(BaseTask):
         lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
         return torch.exp(-lin_vel_error/self.cfg.rewards.tracking_sigma)
 
+    def _reward_world_forward_tracking(self):
+        """Track positive-X velocity on directional obstacle courses."""
+        target = torch.clamp(self.commands[:, 0], min=0.0)
+        error = torch.square(target - self.root_states[:, 7])
+        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+
+    def _reward_world_heading_alignment(self):
+        """Reward keeping the body nose aligned with the course's +X axis."""
+        forward = quat_apply(self.base_quat, self.forward_vec)
+        moving_forward = (self.commands[:, 0] > 0.1).float()
+        return torch.clamp(forward[:, 0], min=0.0, max=1.0) * moving_forward
+
+    def _reward_world_lateral_velocity(self):
+        """Penalize escaping a directional obstacle by moving across it."""
+        moving_forward = (self.commands[:, 0] > 0.1).float()
+        return torch.square(self.root_states[:, 8]) * moving_forward
+
     def _reward_commanded_stall(self):
         """Penalize stopping along any meaningful planar velocity command."""
         command_xy = self.commands[:, :2]
@@ -1679,6 +1787,18 @@ class LeggedRobot(BaseTask):
     def _reward_torque_limits(self):
         # penalize torques too close to the limit
         return torch.sum((torch.abs(self.torques) - self.torque_limits*self.cfg.rewards.soft_torque_limit).clip(min=0.), dim=1)
+
+    def _reward_rated_torque_excess(self):
+        """Softly discourage RS02 output torque above its rated value."""
+        rated = self.rated_motor_torques_nm
+        motor_torque = torch.abs(self.actuator_torques) / self.joint_gear_ratios
+        return torch.sum(torch.square((motor_torque - rated).clip(min=0.0)), dim=1)
+
+    def _reward_rated_torque_incidence(self):
+        """Penalize each motor sample above rated torque, matching the 95% gate."""
+        rated = self.rated_motor_torques_nm
+        motor_torque = torch.abs(self.actuator_torques) / self.joint_gear_ratios
+        return torch.sum((motor_torque > rated).to(torch.float), dim=1)
 
     def _reward_feet_air_time(self):
         # Reward long steps

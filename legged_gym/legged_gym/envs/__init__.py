@@ -62,6 +62,40 @@ from legged_gym.envs.solo12.solo12_v3_1_config import (
     Solo12V31ObstacleMixedStabilityReplayConfig,
     Solo12V31ArmatureAdaptConfig,
     Solo12V31ArmatureReplayConfig,
+    Solo12V31Payload25Config,
+    Solo12V31Payload50Config,
+    Solo12V31Payload75Config,
+    Solo12V31Payload100Config,
+    Solo12V31Payload100TorqueRecoveryConfig,
+    Solo12V31Payload100Envelope125Config,
+    Solo12V31Payload100Envelope150Config,
+    Solo12V31Payload100Envelope200Config,
+    Solo12V31RS06CalfAdaptConfig,
+    Solo12V31RS06CalfWarmupConfig,
+    Solo12V31RS06CalfIntermediateConfig,
+    Solo12V31RS06Payload25Config,
+    Solo12V31RS06Payload50Config,
+    Solo12V31RS06Payload75Config,
+    Solo12V31RS06Payload100Config,
+    Solo12V31RS06Payload100TorqueRecoveryConfig,
+    Solo12V31RS06Payload100TorqueRecoveryStrongConfig,
+    Solo12V31RS06Thigh2Payload100AdaptConfig,
+    Solo12V31RS06Thigh2Payload100HardReplayConfig,
+    Solo12V31RS06Thigh2Payload100SlopeFocusConfig,
+    Solo12V31RS06Thigh2Payload100SlopeHighConfig,
+    Solo12V31RS06Thigh2Payload100FinalReplayConfig,
+    Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig,
+    Solo12V31RS06Thigh2StraightObstacleAConfig,
+    Solo12V31RS06Thigh2StraightObstacleBConfig,
+    Solo12V31RS06Thigh2StraightObstacleFinalConfig,
+    Solo12V31RS06Thigh2StraightSlope45Config,
+    Solo12V31RS06Thigh2StraightSlope45CapabilityConfig,
+    Solo12V31RS06Thigh3StraightObstacleAdaptConfig,
+    Solo12V31RS06Thigh3StraightObstacleReplayConfig,
+    Solo12V31RS06Thigh3Speed15AdaptConfig,
+    Solo12V31RS06Thigh3Speed20AdaptConfig,
+    Solo12V31RS06Thigh3StraightSlopeAdaptConfig,
+    Solo12V31RS06Payload100HardReplayConfig,
     Solo12V31ArmatureDeployNominalConfig,
     Solo12V31ObstacleMixedStabilityFlatReplayConfig,
     Solo12V31ObstacleHardReplayConfig,
@@ -117,6 +151,40 @@ task_registry.register( "solo12_v3_1_obstacle_mixed_stability_high_stair", Legge
 task_registry.register( "solo12_v3_1_obstacle_mixed_stability_replay", LeggedRobot, Solo12V31ObstacleMixedStabilityReplayConfig(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_armature_adapt", LeggedRobot, Solo12V31ArmatureAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_armature_replay", LeggedRobot, Solo12V31ArmatureReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_2_5", LeggedRobot, Solo12V31Payload25Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_5", LeggedRobot, Solo12V31Payload50Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_7_5", LeggedRobot, Solo12V31Payload75Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_10", LeggedRobot, Solo12V31Payload100Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_10_torque_recovery", LeggedRobot, Solo12V31Payload100TorqueRecoveryConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_10_envelope125", LeggedRobot, Solo12V31Payload100Envelope125Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_10_envelope150", LeggedRobot, Solo12V31Payload100Envelope150Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_payload_10_envelope200", LeggedRobot, Solo12V31Payload100Envelope200Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_adapt", LeggedRobot, Solo12V31RS06CalfAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_warmup", LeggedRobot, Solo12V31RS06CalfWarmupConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_intermediate", LeggedRobot, Solo12V31RS06CalfIntermediateConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_2_5", LeggedRobot, Solo12V31RS06Payload25Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_5", LeggedRobot, Solo12V31RS06Payload50Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_7_5", LeggedRobot, Solo12V31RS06Payload75Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_10", LeggedRobot, Solo12V31RS06Payload100Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_10_torque_recovery", LeggedRobot, Solo12V31RS06Payload100TorqueRecoveryConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_10_torque_recovery_strong", LeggedRobot, Solo12V31RS06Payload100TorqueRecoveryStrongConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_adapt", LeggedRobot, Solo12V31RS06Thigh2Payload100AdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_hard_replay", LeggedRobot, Solo12V31RS06Thigh2Payload100HardReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_slope_focus", LeggedRobot, Solo12V31RS06Thigh2Payload100SlopeFocusConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_slope_high", LeggedRobot, Solo12V31RS06Thigh2Payload100SlopeHighConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_final_replay", LeggedRobot, Solo12V31RS06Thigh2Payload100FinalReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_uneven_torque_recovery", LeggedRobot, Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_straight_obstacle_a", LeggedRobot, Solo12V31RS06Thigh2StraightObstacleAConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_straight_obstacle_b", LeggedRobot, Solo12V31RS06Thigh2StraightObstacleBConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_straight_obstacle_final", LeggedRobot, Solo12V31RS06Thigh2StraightObstacleFinalConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_straight_slope45", LeggedRobot, Solo12V31RS06Thigh2StraightSlope45Config(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh2_straight_slope45_capability", LeggedRobot, Solo12V31RS06Thigh2StraightSlope45CapabilityConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh3_straight_obstacle_adapt", LeggedRobot, Solo12V31RS06Thigh3StraightObstacleAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh3_straight_obstacle_replay", LeggedRobot, Solo12V31RS06Thigh3StraightObstacleReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh3_speed15_adapt", LeggedRobot, Solo12V31RS06Thigh3Speed15AdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh3_speed20_adapt", LeggedRobot, Solo12V31RS06Thigh3Speed20AdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_thigh3_straight_slope_adapt", LeggedRobot, Solo12V31RS06Thigh3StraightSlopeAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs06_payload_10_hard_replay", LeggedRobot, Solo12V31RS06Payload100HardReplayConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_armature_deploy_nominal", LeggedRobot, Solo12V31ArmatureDeployNominalConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_mixed_stability_flat_replay", LeggedRobot, Solo12V31ObstacleMixedStabilityFlatReplayConfig(), Solo12V31RoughCfgPPO() )
 task_registry.register( "solo12_v3_1_obstacle_hard_replay", LeggedRobot, Solo12V31ObstacleHardReplayConfig(), Solo12V31RoughCfgPPO() )

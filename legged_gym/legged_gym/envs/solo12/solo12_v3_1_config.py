@@ -51,6 +51,7 @@ class Solo12V31RoughCfg(LeggedRobotCfg):
         # No external-transmission efficiency data is available in the manual;
         # use the explicitly ideal value for the first model.
         transmission_efficiencies = {"joint": 1.0}
+        rated_motor_torque_nm = 6.0
 
     class commands(LeggedRobotCfg.commands):
         curriculum = True
@@ -546,6 +547,608 @@ class Solo12V31ArmatureReplayConfig(Solo12V31ArmatureAdaptConfig):
 
     class domain_rand(Solo12V31ArmatureAdaptConfig.domain_rand):
         armature_zero_probability = 0.25
+
+
+class Solo12V31Payload25Config(Solo12V31ArmatureReplayConfig):
+    """First payload curriculum stage: exact 0/2.5 kg replay plus interior samples."""
+
+    class domain_rand(Solo12V31ArmatureReplayConfig.domain_rand):
+        randomize_payload_mass = True
+        payload_mass_range = [0.0, 2.5]
+        payload_min_endpoint_probability = 0.15
+        payload_max_endpoint_probability = 0.15
+
+    class rewards(Solo12V31ArmatureReplayConfig.rewards):
+        class scales(Solo12V31ArmatureReplayConfig.rewards.scales):
+            # This is a preference, not a 6 Nm clamp. The physical 48 V
+            # torque-speed envelope remains the only actuator torque clamp.
+            rated_torque_excess = -0.002
+
+
+class Solo12V31Payload50Config(Solo12V31Payload25Config):
+    class domain_rand(Solo12V31Payload25Config.domain_rand):
+        payload_mass_range = [0.0, 5.0]
+
+
+class Solo12V31Payload75Config(Solo12V31Payload50Config):
+    class domain_rand(Solo12V31Payload50Config.domain_rand):
+        payload_mass_range = [0.0, 7.5]
+
+
+class Solo12V31Payload100Config(Solo12V31Payload75Config):
+    class domain_rand(Solo12V31Payload75Config.domain_rand):
+        payload_mass_range = [0.0, 10.0]
+
+
+class Solo12V31Payload100TorqueRecoveryConfig(Solo12V31Payload100Config):
+    """Final real-envelope recovery with a stronger rated-torque preference."""
+
+    class rewards(Solo12V31Payload100Config.rewards):
+        class scales(Solo12V31Payload100Config.rewards.scales):
+            rated_torque_excess = -0.02
+
+
+class Solo12V31Payload100Envelope125Config(Solo12V31Payload100Config):
+    """Diagnostic only: scale both envelope and URDF effort limits by 1.25."""
+
+    class control(Solo12V31Payload100Config.control):
+        torque_speed_envelope_scale = 1.25
+        rated_motor_torque_nm = 7.5
+
+    class asset(Solo12V31Payload100Config.asset):
+        dof_torque_limit_scale = 1.25
+
+
+class Solo12V31Payload100Envelope150Config(Solo12V31Payload100Config):
+    """Diagnostic only: scale both envelope and URDF effort limits by 1.5."""
+
+    class control(Solo12V31Payload100Config.control):
+        torque_speed_envelope_scale = 1.5
+        rated_motor_torque_nm = 9.0
+
+    class asset(Solo12V31Payload100Config.asset):
+        dof_torque_limit_scale = 1.5
+
+
+class Solo12V31Payload100Envelope200Config(Solo12V31Payload100Config):
+    """Diagnostic only: scale both envelope and URDF effort limits by 2.0."""
+
+    class control(Solo12V31Payload100Config.control):
+        torque_speed_envelope_scale = 2.0
+        rated_motor_torque_nm = 12.0
+
+    class asset(Solo12V31Payload100Config.asset):
+        dof_torque_limit_scale = 2.0
+
+
+class Solo12V31RS06CalfAdaptConfig(Solo12V31ArmatureReplayConfig):
+    """Adapt checkpoint 8520 to RS06 calf actuators and a 3:1 external stage."""
+
+    class control(Solo12V31ArmatureReplayConfig.control):
+        # RS02 stays on hip/thigh. RS06 is used only by calf joints. The RS06
+        # points are digitized from the official 2026-07-13 48 V T-N plot; the
+        # documented 480 rpm no-load point closes the curve at zero torque.
+        torque_speed_curves = {
+            "hip": {
+                "rpm": [
+                    0.0, 60.0, 120.0, 180.0, 210.0, 225.0, 240.0, 255.0,
+                    270.0, 285.0, 300.0, 315.0, 330.0, 345.0, 360.0, 375.0,
+                    390.0, 405.0, 420.0,
+                ],
+                "nm": [
+                    17.0, 16.8, 16.7, 16.9, 16.8, 16.6, 16.0, 15.4,
+                    14.7, 13.4, 12.0, 10.8, 9.5, 8.2, 6.1, 4.7,
+                    3.4, 1.9, 0.0,
+                ],
+            },
+            "thigh": {
+                "rpm": [
+                    0.0, 60.0, 120.0, 180.0, 210.0, 225.0, 240.0, 255.0,
+                    270.0, 285.0, 300.0, 315.0, 330.0, 345.0, 360.0, 375.0,
+                    390.0, 405.0, 420.0,
+                ],
+                "nm": [
+                    17.0, 16.8, 16.7, 16.9, 16.8, 16.6, 16.0, 15.4,
+                    14.7, 13.4, 12.0, 10.8, 9.5, 8.2, 6.1, 4.7,
+                    3.4, 1.9, 0.0,
+                ],
+            },
+            "calf": {
+                "rpm": [
+                    0.0, 100.0, 250.0, 280.0, 300.0, 320.0, 340.0,
+                    360.0, 380.0, 400.0, 410.0, 420.0, 425.0, 430.0, 480.0,
+                ],
+                "nm": [
+                    36.0, 36.0, 36.0, 36.0, 33.0, 30.0, 27.0,
+                    24.5, 21.5, 18.0, 16.0, 13.5, 11.5, 5.0, 0.0,
+                ],
+            },
+        }
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
+        rated_motor_torque_nm = 6.0
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 6.0, "calf": 11.0}
+
+    class asset(Solo12V31ArmatureReplayConfig.asset):
+        dof_velocity_limits = {"calf": 16.755160819145562}
+        dof_torque_limits = {"calf": 108.0}
+        # The RS06 housing is mounted at the knee on the thigh-side link.
+        body_mass_additions = {"thigh": 0.241}
+
+    class domain_rand(Solo12V31ArmatureReplayConfig.domain_rand):
+        randomize_payload_mass = False
+        payload_mass_range = [0.0, 0.0]
+        # RS06 output inertia is not published. This range scales the known
+        # RS02 estimate by actuator mass/radius and the new external ratio.
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.045, 0.095],
+        }
+        armature_zero_probability = 0.0
+
+    class rewards(Solo12V31ArmatureReplayConfig.rewards):
+        class scales(Solo12V31ArmatureReplayConfig.rewards.scales):
+            rated_torque_excess = -0.002
+
+
+class Solo12V31RS06CalfWarmupConfig(Solo12V31RS06CalfAdaptConfig):
+    """Conservative first handoff: 3:1 and mass are final, capability is staged."""
+
+    class control(Solo12V31RS06CalfAdaptConfig.control):
+        torque_speed_envelope_scales = {"calf": 0.35}
+
+    class domain_rand(Solo12V31RS06CalfAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.0168, 0.035],
+        }
+
+
+class Solo12V31RS06CalfIntermediateConfig(Solo12V31RS06CalfAdaptConfig):
+    """Intermediate handoff before exposing the complete RS06 capability."""
+
+    class control(Solo12V31RS06CalfAdaptConfig.control):
+        torque_speed_envelope_scales = {"calf": 0.65}
+
+    class domain_rand(Solo12V31RS06CalfAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.03, 0.065],
+        }
+
+
+class Solo12V31RS06Payload25Config(Solo12V31RS06CalfAdaptConfig):
+    class domain_rand(Solo12V31RS06CalfAdaptConfig.domain_rand):
+        randomize_payload_mass = True
+        payload_mass_range = [0.0, 2.5]
+        payload_min_endpoint_probability = 0.15
+        payload_max_endpoint_probability = 0.15
+
+
+class Solo12V31RS06Payload50Config(Solo12V31RS06Payload25Config):
+    class domain_rand(Solo12V31RS06Payload25Config.domain_rand):
+        payload_mass_range = [0.0, 5.0]
+
+
+class Solo12V31RS06Payload75Config(Solo12V31RS06Payload50Config):
+    class domain_rand(Solo12V31RS06Payload50Config.domain_rand):
+        payload_mass_range = [0.0, 7.5]
+
+
+class Solo12V31RS06Payload100Config(Solo12V31RS06Payload75Config):
+    class domain_rand(Solo12V31RS06Payload75Config.domain_rand):
+        payload_mass_range = [0.0, 10.0]
+        payload_min_endpoint_probability = 0.15
+        payload_max_endpoint_probability = 0.25
+
+
+class Solo12V31RS06Payload100TorqueRecoveryConfig(Solo12V31RS06Payload100Config):
+    class rewards(Solo12V31RS06Payload100Config.rewards):
+        class scales(Solo12V31RS06Payload100Config.rewards.scales):
+            rated_torque_excess = -0.02
+
+
+class Solo12V31RS06Payload100TorqueRecoveryStrongConfig(
+    Solo12V31RS06Payload100TorqueRecoveryConfig
+):
+    """Stronger recovery stage used only if the 95% rated-torque gate fails."""
+
+    class rewards(Solo12V31RS06Payload100TorqueRecoveryConfig.rewards):
+        class scales(Solo12V31RS06Payload100TorqueRecoveryConfig.rewards.scales):
+            rated_torque_excess = -0.08
+
+
+class Solo12V31RS06Thigh2Payload100AdaptConfig(
+    Solo12V31RS06Payload100TorqueRecoveryStrongConfig
+):
+    """Adapt checkpoint 10320 to RS02 hip 1:1, RS02 thigh 2:1, RS06 calf 3:1."""
+
+    class control(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 2.0, "calf": 3.0}
+
+    class asset(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.asset):
+        # RS02/RS06 documented motor-speed endpoints divided by each external ratio.
+        dof_velocity_limits = {
+            "thigh": 21.991148575128552,
+            "calf": 16.755160819145562,
+        }
+        # Joint-side peak torque from the unscaled physical T-N envelopes.
+        dof_torque_limits = {"thigh": 34.0, "calf": 108.0}
+
+    class domain_rand(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.domain_rand):
+        # RS02 reflected inertia scales with ratio squared: 0.00504 * 2^2.
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.02016],
+            "calf": [0.045, 0.095],
+        }
+
+
+class Solo12V31RS06Thigh2Payload100HardReplayConfig(
+    Solo12V31RS06Thigh2Payload100AdaptConfig
+):
+    """Terrain replay after the thigh 2:1 drivetrain handoff is stable."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100AdaptConfig.terrain):
+        max_init_terrain_level = 9
+        mixed_plane_probability = 0.10
+        mixed_stair_probability = 0.20
+        mixed_slope_probability = 0.35
+        mixed_slope_angle_range_deg = [35.0, 45.0]
+        mixed_continuous_uneven_probability = 0.45
+        mixed_stair_height_range = [0.115, 0.15]
+        terrain_length = 12.0
+        slope_ramp_start_distance = 7.1
+        slope_treshold = 1.05
+
+    class commands(Solo12V31RS06Thigh2Payload100AdaptConfig.commands):
+        class ranges(Solo12V31RS06Thigh2Payload100AdaptConfig.commands.ranges):
+            lin_vel_x = [0.1, 1.0]
+
+
+class Solo12V31RS06Thigh2Payload100SlopeFocusConfig(
+    Solo12V31RS06Thigh2Payload100HardReplayConfig
+):
+    """Use a 20--45 degree curriculum around the 0.7 m/s acceptance point."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100HardReplayConfig.terrain):
+        # Start near 20--28 degrees, then promote successful environments one
+        # row at a time until curriculum level 9 reaches exactly 45 degrees.
+        curriculum = True
+        max_init_terrain_level = 3
+        mixed_plane_probability = 0.0
+        mixed_stair_probability = 0.0
+        mixed_slope_probability = 1.0
+        mixed_slope_angle_range_deg = [20.0, 45.0]
+        mixed_continuous_uneven_probability = 0.0
+        terrain_length = 20.0
+        slope_ramp_start_distance = 3.5
+        spawn_offset_x = 2.0
+
+    class commands(Solo12V31RS06Thigh2Payload100HardReplayConfig.commands):
+        heading_command = False
+        forward_only_fraction = 0.0
+
+        class ranges(Solo12V31RS06Thigh2Payload100HardReplayConfig.commands.ranges):
+            lin_vel_x = [0.55, 0.80]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+
+    class domain_rand(Solo12V31RS06Thigh2Payload100HardReplayConfig.domain_rand):
+        # Bias the specialization pass toward the exact worst-case payload.
+        payload_min_endpoint_probability = 0.10
+        payload_max_endpoint_probability = 0.50
+
+
+class Solo12V31RS06Thigh2Payload100SlopeHighConfig(
+    Solo12V31RS06Thigh2Payload100SlopeFocusConfig
+):
+    """High-angle polish after the broad 20--45 degree curriculum succeeds."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100SlopeFocusConfig.terrain):
+        max_init_terrain_level = 5
+        mixed_slope_angle_range_deg = [35.0, 45.0]
+
+    class commands(Solo12V31RS06Thigh2Payload100SlopeFocusConfig.commands):
+        class ranges(Solo12V31RS06Thigh2Payload100SlopeFocusConfig.commands.ranges):
+            lin_vel_x = [0.65, 0.75]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+
+
+class Solo12V31RS06Thigh2Payload100FinalReplayConfig(
+    Solo12V31RS06Thigh2Payload100SlopeHighConfig
+):
+    """Recover stairs/uneven terrain while retaining high-angle ramp skill."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100SlopeHighConfig.terrain):
+        max_init_terrain_level = 9
+        terrain_length = 20.0
+        spawn_offset_x = 2.0
+        slope_ramp_start_distance = 3.5
+        # Actual sequential probabilities: plane 10%, stairs 35%, slope 25%,
+        # and continuous uneven 30%.
+        mixed_plane_probability = 0.10
+        mixed_stair_probability = 0.3888888888888889
+        mixed_slope_probability = 0.45454545454545453
+        mixed_continuous_uneven_probability = 1.0
+        mixed_stair_height_range = [0.12, 0.15]
+        mixed_slope_angle_range_deg = [35.0, 45.0]
+
+    class commands(Solo12V31RS06Thigh2Payload100SlopeHighConfig.commands):
+        class ranges(Solo12V31RS06Thigh2Payload100SlopeHighConfig.commands.ranges):
+            lin_vel_x = [0.65, 1.0]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+
+
+class Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig(
+    Solo12V31RS06Thigh2Payload100FinalReplayConfig
+):
+    """Recover rated-torque margin on level-9 uneven terrain without forgetting."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100FinalReplayConfig.terrain):
+        # Actual sequential probabilities: plane 5%, stairs 15%, slope 15%,
+        # and continuous uneven 65%.
+        mixed_plane_probability = 0.05
+        mixed_stair_probability = 0.15789473684210525
+        mixed_slope_probability = 0.1875
+        mixed_continuous_uneven_probability = 1.0
+
+    class commands(Solo12V31RS06Thigh2Payload100FinalReplayConfig.commands):
+        class ranges(Solo12V31RS06Thigh2Payload100FinalReplayConfig.commands.ranges):
+            lin_vel_x = [0.85, 1.0]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+
+    class rewards(Solo12V31RS06Thigh2Payload100FinalReplayConfig.rewards):
+        class scales(Solo12V31RS06Thigh2Payload100FinalReplayConfig.rewards.scales):
+            rated_torque_excess = -0.20
+            rated_torque_incidence = -0.50
+
+
+class Solo12V31RS06Thigh2StraightObstacleAConfig(
+    Solo12V31RS06Thigh2Payload100AdaptConfig
+):
+    """Relearn facing-direction stairs/ramps without sideways escape."""
+
+    class terrain(Solo12V31RS06Thigh2Payload100AdaptConfig.terrain):
+        curriculum = True
+        curriculum_use_command_progress = False
+        curriculum_use_world_x_progress = True
+        max_init_terrain_level = 2
+        terrain_length = 14.0
+        terrain_width = 8.0
+        spawn_offset_x = 2.0
+        slope_ramp_start_distance = 3.5
+        mixed_plane_probability = 0.05
+        mixed_stair_probability = 0.4736842105263158
+        mixed_slope_probability = 0.90
+        mixed_continuous_uneven_probability = 1.0
+        mixed_stair_height_range = [0.06, 0.15]
+        mixed_slope_angle_range_deg = [15.0, 45.0]
+        slope_treshold = 1.05
+
+    class commands(Solo12V31RS06Thigh2Payload100AdaptConfig.commands):
+        heading_command = False
+        forward_only_fraction = 0.0
+
+        class ranges(Solo12V31RS06Thigh2Payload100AdaptConfig.commands.ranges):
+            lin_vel_x = [0.55, 0.80]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+            heading = [0.0, 0.0]
+
+    class domain_rand(Solo12V31RS06Thigh2Payload100AdaptConfig.domain_rand):
+        payload_min_endpoint_probability = 0.10
+        payload_max_endpoint_probability = 0.50
+
+    class rewards(Solo12V31RS06Thigh2Payload100AdaptConfig.rewards):
+        class scales(Solo12V31RS06Thigh2Payload100AdaptConfig.rewards.scales):
+            world_forward_tracking = 3.0
+            world_heading_alignment = 2.0
+            world_lateral_velocity = -1.0
+
+
+class Solo12V31RS06Thigh2StraightObstacleBConfig(
+    Solo12V31RS06Thigh2StraightObstacleAConfig
+):
+    """Bridge the measured 25--30 degree capability toward 35 degrees."""
+
+    class terrain(Solo12V31RS06Thigh2StraightObstacleAConfig.terrain):
+        max_init_terrain_level = 5
+        mixed_plane_probability = 0.0
+        mixed_stair_probability = 0.0
+        mixed_slope_probability = 1.0
+        mixed_continuous_uneven_probability = 0.0
+        mixed_slope_angle_range_deg = [20.0, 35.0]
+
+    class rewards(Solo12V31RS06Thigh2StraightObstacleAConfig.rewards):
+        class scales(Solo12V31RS06Thigh2StraightObstacleAConfig.rewards.scales):
+            # A flat-body penalty conflicts with the pitch needed to follow a
+            # steep ramp. Height-relative posture terms remain active.
+            orientation = 0.0
+
+
+class Solo12V31RS06Thigh2StraightObstacleFinalConfig(
+    Solo12V31RS06Thigh2StraightObstacleBConfig
+):
+    """Continue the pure-ramp curriculum through roughly 42 degrees."""
+
+    class terrain(Solo12V31RS06Thigh2StraightObstacleBConfig.terrain):
+        max_init_terrain_level = 5
+        mixed_slope_angle_range_deg = [28.0, 42.0]
+
+    class commands(Solo12V31RS06Thigh2StraightObstacleBConfig.commands):
+        class ranges(Solo12V31RS06Thigh2StraightObstacleBConfig.commands.ranges):
+            lin_vel_x = [0.65, 0.75]
+
+    class rewards(Solo12V31RS06Thigh2StraightObstacleBConfig.rewards):
+        class scales(Solo12V31RS06Thigh2StraightObstacleBConfig.rewards.scales):
+            rated_torque_excess = -0.20
+            rated_torque_incidence = -0.50
+
+
+class Solo12V31RS06Thigh2StraightSlope45Config(
+    Solo12V31RS06Thigh2StraightObstacleFinalConfig
+):
+    """Final pure-ramp polish over 35--45 degrees."""
+
+    class terrain(Solo12V31RS06Thigh2StraightObstacleFinalConfig.terrain):
+        max_init_terrain_level = 5
+        mixed_slope_angle_range_deg = [35.0, 45.0]
+
+    class rewards(Solo12V31RS06Thigh2StraightObstacleFinalConfig.rewards):
+        class scales(Solo12V31RS06Thigh2StraightObstacleFinalConfig.rewards.scales):
+            rated_torque_excess = -0.30
+            rated_torque_incidence = -0.80
+
+
+class Solo12V31RS06Thigh2StraightSlope45CapabilityConfig(
+    Solo12V31RS06Thigh2StraightSlope45Config
+):
+    """Peak-envelope capability probe without the rated-duty objective."""
+
+    class rewards(Solo12V31RS06Thigh2StraightSlope45Config.rewards):
+        class scales(Solo12V31RS06Thigh2StraightSlope45Config.rewards.scales):
+            rated_torque_excess = 0.0
+            rated_torque_incidence = 0.0
+
+
+class Solo12V31RS06Thigh3StraightObstacleAdaptConfig(
+    Solo12V31RS06Thigh2StraightObstacleAConfig
+):
+    """Adapt the mixed-obstacle policy to RS02 thigh 3:1 and RS06 calf 3:1."""
+
+    class control(Solo12V31RS06Thigh2StraightObstacleAConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 3.0, "calf": 3.0}
+
+    class asset(Solo12V31RS06Thigh2StraightObstacleAConfig.asset):
+        # RS02 reaches its modeled 420 rpm endpoint at 14.6608 rad/s joint-side.
+        dof_velocity_limits = {
+            "thigh": 14.660765716752367,
+            "calf": 16.755160819145562,
+        }
+        dof_torque_limits = {"thigh": 51.0, "calf": 108.0}
+
+    class domain_rand(Solo12V31RS06Thigh2StraightObstacleAConfig.domain_rand):
+        # RS02 reflected inertia scales with the square of the external ratio.
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.04536],
+            "calf": [0.045, 0.095],
+        }
+
+
+class Solo12V31RS06Thigh3StraightObstacleReplayConfig(
+    Solo12V31RS06Thigh3StraightObstacleAdaptConfig
+):
+    """Recover 1 m/s plane/uneven and 15 cm stair performance after handoff."""
+
+    class terrain(Solo12V31RS06Thigh3StraightObstacleAdaptConfig.terrain):
+        max_init_terrain_level = 9
+        mixed_plane_probability = 0.15
+        mixed_stair_probability = 0.4117647058823529
+        mixed_slope_probability = 0.0
+        mixed_continuous_uneven_probability = 1.0
+        mixed_stair_height_range = [0.10, 0.15]
+
+    class commands(Solo12V31RS06Thigh3StraightObstacleAdaptConfig.commands):
+        class ranges(Solo12V31RS06Thigh3StraightObstacleAdaptConfig.commands.ranges):
+            lin_vel_x = [0.55, 1.0]
+
+    class rewards(Solo12V31RS06Thigh3StraightObstacleAdaptConfig.rewards):
+        class scales(Solo12V31RS06Thigh3StraightObstacleAdaptConfig.rewards.scales):
+            rated_torque_excess = -0.20
+            rated_torque_incidence = -0.50
+
+
+class Solo12V31RS06Thigh3Speed15AdaptConfig(
+    Solo12V31RS06Thigh3StraightObstacleReplayConfig
+):
+    """First high-speed handoff on plane and continuous uneven terrain."""
+
+    class terrain(Solo12V31RS06Thigh3StraightObstacleReplayConfig.terrain):
+        max_init_terrain_level = 9
+        mixed_plane_probability = 0.30
+        mixed_stair_probability = 0.0
+        mixed_slope_probability = 0.0
+        mixed_continuous_uneven_probability = 1.0
+
+    class commands(Solo12V31RS06Thigh3StraightObstacleReplayConfig.commands):
+        class ranges(Solo12V31RS06Thigh3StraightObstacleReplayConfig.commands.ranges):
+            lin_vel_x = [0.90, 1.50]
+
+    class domain_rand(Solo12V31RS06Thigh3StraightObstacleReplayConfig.domain_rand):
+        payload_min_endpoint_probability = 0.10
+        payload_max_endpoint_probability = 0.50
+
+
+class Solo12V31RS06Thigh3Speed20AdaptConfig(
+    Solo12V31RS06Thigh3Speed15AdaptConfig
+):
+    """Extend the +10 kg-capable plane/uneven policy to 2.0 m/s."""
+
+    class terrain(Solo12V31RS06Thigh3Speed15AdaptConfig.terrain):
+        mixed_plane_probability = 0.35
+
+    class commands(Solo12V31RS06Thigh3Speed15AdaptConfig.commands):
+        class ranges(Solo12V31RS06Thigh3Speed15AdaptConfig.commands.ranges):
+            lin_vel_x = [1.30, 2.00]
+
+
+class Solo12V31RS06Thigh3StraightSlopeAdaptConfig(
+    Solo12V31RS06Thigh2StraightSlope45Config
+):
+    """Adapt the dedicated ramp policy to RS02 thigh 3:1 at 0.25--0.55 m/s."""
+
+    class control(Solo12V31RS06Thigh2StraightSlope45Config.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 3.0, "calf": 3.0}
+
+    class asset(Solo12V31RS06Thigh2StraightSlope45Config.asset):
+        dof_velocity_limits = {
+            "thigh": 14.660765716752367,
+            "calf": 16.755160819145562,
+        }
+        dof_torque_limits = {"thigh": 51.0, "calf": 108.0}
+
+    class domain_rand(Solo12V31RS06Thigh2StraightSlope45Config.domain_rand):
+        friction_range = [1.0, 1.4]
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.04536],
+            "calf": [0.045, 0.095],
+        }
+
+    class commands(Solo12V31RS06Thigh2StraightSlope45Config.commands):
+        class ranges(Solo12V31RS06Thigh2StraightSlope45Config.commands.ranges):
+            lin_vel_x = [0.25, 0.55]
+            lin_vel_y = [0.0, 0.0]
+            ang_vel_yaw = [0.0, 0.0]
+
+    class rewards(Solo12V31RS06Thigh2StraightSlope45Config.rewards):
+        class scales(Solo12V31RS06Thigh2StraightSlope45Config.rewards.scales):
+            rated_torque_excess = -0.30
+            rated_torque_incidence = -0.80
+
+
+class Solo12V31RS06Payload100HardReplayConfig(
+    Solo12V31RS06Payload100TorqueRecoveryStrongConfig
+):
+    """Replay hard continuous uneven terrain while retaining stairs and plane."""
+
+    class terrain(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.terrain):
+        max_init_terrain_level = 9
+        mixed_plane_probability = 0.10
+        mixed_stair_probability = 0.25
+        mixed_continuous_uneven_probability = 0.50
+        mixed_stair_height_range = [0.115, 0.15]
+
+    class commands(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.commands):
+        class ranges(Solo12V31RS06Payload100TorqueRecoveryStrongConfig.commands.ranges):
+            lin_vel_x = [0.1, 1.0]
 
 
 class Solo12V31ArmatureDeployNominalConfig(Solo12V31ArmatureAdaptConfig):

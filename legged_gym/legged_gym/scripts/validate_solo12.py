@@ -19,6 +19,28 @@ STAGES = {
     "solo12_v3_1_r6": ([0.0, 40.0], True, [0.0, 0.2]),
 }
 
+PAYLOAD_STAGES = {
+    "solo12_v3_1_payload_2_5": (2.5, 1.0, 6.0),
+    "solo12_v3_1_payload_5": (5.0, 1.0, 6.0),
+    "solo12_v3_1_payload_7_5": (7.5, 1.0, 6.0),
+    "solo12_v3_1_payload_10": (10.0, 1.0, 6.0),
+    "solo12_v3_1_payload_10_torque_recovery": (10.0, 1.0, 6.0),
+    "solo12_v3_1_payload_10_envelope125": (10.0, 1.25, 7.5),
+    "solo12_v3_1_payload_10_envelope150": (10.0, 1.5, 9.0),
+    "solo12_v3_1_payload_10_envelope200": (10.0, 2.0, 12.0),
+}
+
+RS06_STAGES = {
+    "solo12_v3_1_rs06_adapt": 0.0,
+    "solo12_v3_1_rs06_warmup": 0.0,
+    "solo12_v3_1_rs06_intermediate": 0.0,
+    "solo12_v3_1_rs06_payload_2_5": 2.5,
+    "solo12_v3_1_rs06_payload_5": 5.0,
+    "solo12_v3_1_rs06_payload_7_5": 7.5,
+    "solo12_v3_1_rs06_payload_10": 10.0,
+    "solo12_v3_1_rs06_payload_10_torque_recovery": 10.0,
+}
+
 
 def validate_configs():
     assert set(STAGES) <= set(task_registry.task_classes)
@@ -44,11 +66,30 @@ def validate_configs():
         )
         assert cfg.control.torque_speed_curve_rpm[-1] == 420.0
         assert cfg.control.torque_speed_curve_nm[-1] == 0.0
+    assert set(PAYLOAD_STAGES) <= set(task_registry.task_classes)
+    for task, (payload_max, capability_scale, rated_nm) in PAYLOAD_STAGES.items():
+        cfg = task_registry.env_cfgs[task]
+        assert cfg.domain_rand.payload_mass_range == [0.0, payload_max]
+        assert cfg.domain_rand.payload_min_endpoint_probability == 0.15
+        assert cfg.domain_rand.payload_max_endpoint_probability == 0.15
+        assert cfg.control.torque_speed_envelope_scale == capability_scale
+        assert cfg.asset.dof_torque_limit_scale == capability_scale
+        assert cfg.control.rated_motor_torque_nm == rated_nm
+    assert set(RS06_STAGES) <= set(task_registry.task_classes)
+    for task, payload_max in RS06_STAGES.items():
+        cfg = task_registry.env_cfgs[task]
+        assert cfg.domain_rand.payload_mass_range == [0.0, payload_max]
+        assert cfg.control.joint_gear_ratios["calf"] == 3.0
+        assert cfg.control.rated_motor_torques_nm["calf"] == 11.0
+        assert cfg.control.torque_speed_curves["calf"]["rpm"][-1] == 480.0
+        assert cfg.control.torque_speed_curves["calf"]["nm"][-1] == 0.0
+        assert cfg.asset.dof_torque_limits["calf"] == 108.0
+        assert cfg.asset.body_mass_additions == {"thigh": 0.241}
 
 
 def validate_runtime():
     args = get_args()
-    args.task = "solo12_v3_1_r6"
+    args.task = "solo12_v3_1_rs06_adapt"
     args.headless = True
     args.num_envs = 1
     env_cfg, _ = task_registry.get_cfgs(args.task)
@@ -64,15 +105,26 @@ def validate_runtime():
     assert env.Kp_factors.shape == (1, 12)
     assert env.Kd_factors.shape == (1, 12)
     assert env.motor_strength_factors.shape == (1, 12)
-    assert env.raw_actor_obs_history.shape == (1, 3, 45), env.raw_actor_obs_history.shape
+    assert env.raw_actor_obs_history.shape[0] == 1
+    assert env.raw_actor_obs_history.shape[2] == 45
     expected_gears = torch.tensor(
-        [1.0, 1.0, 2.0] * 4, device=env.device
+        [1.0, 1.0, 3.0] * 4, device=env.device
     )
     expected_velocity_limits = torch.tensor(
-        [44.0, 44.0, 22.0] * 4, device=env.device
+        [43.9823, 43.9823, 16.755160819145562] * 4, device=env.device
     )
-    assert torch.equal(env.joint_gear_ratios, expected_gears)
-    assert torch.equal(env.dof_vel_limits, expected_velocity_limits)
+    assert torch.allclose(env.joint_gear_ratios, expected_gears)
+    assert torch.allclose(
+        env.dof_vel_limits, expected_velocity_limits
+    ), (env.dof_names, env.dof_vel_limits, expected_velocity_limits)
+    assert torch.allclose(
+        env.rated_motor_torques_nm,
+        torch.tensor([6.0, 6.0, 11.0] * 4, device=env.device),
+    )
+    assert torch.allclose(
+        env.torque_limits,
+        torch.tensor([17.0, 17.0, 108.0] * 4, device=env.device),
+    )
 
     obs, privileged_obs = env.reset()
     assert obs.shape == (1, 270)
