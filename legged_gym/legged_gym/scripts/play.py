@@ -45,6 +45,24 @@ import torch
 def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     if args.command_switch_time_s is not None and args.command_switch_time_s < 0.0:
         raise ValueError("--command_switch_time_s must be non-negative")
+    if args.obstacle_entry_height_m <= 0.0:
+        raise ValueError("--obstacle_entry_height_m must be positive")
+    if args.post_entry_seconds is not None and args.post_entry_seconds <= 0.0:
+        raise ValueError("--post_entry_seconds must be positive")
+    if (
+        args.minimum_post_entry_progress_m is not None
+        and args.minimum_post_entry_progress_m <= 0.0
+    ):
+        raise ValueError("--minimum_post_entry_progress_m must be positive")
+    obstacle_gate_requested = (
+        args.require_obstacle_entry
+        or args.command_switch_on_obstacle_entry
+        or args.analysis_start_after_entry
+        or args.post_entry_seconds is not None
+        or args.minimum_post_entry_progress_m is not None
+    )
+    if obstacle_gate_requested and args.play_terrain not in ("stairs", "slope"):
+        raise ValueError("Obstacle-entry options require --play_terrain stairs or slope")
     after_command = np.asarray(
         [
             x_vel if args.command_x_after is None else args.command_x_after,
@@ -139,10 +157,15 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         env_cfg.terrain.mixed_stair_probability = 0.0
         env_cfg.terrain.mixed_slope_probability = 0.0
         env_cfg.terrain.mixed_continuous_uneven_probability = 0.0
-        env_cfg.terrain.up_down_stairs = True
+        env_cfg.terrain.up_down_stairs = False
+        env_cfg.terrain.continuous_up_stairs = True
         env_cfg.terrain.continuous_uneven = False
         env_cfg.terrain.up_down_stair_height = args.stair_step_height
         env_cfg.terrain.spawn_offset_x = 1.5
+        env_cfg.terrain.terrain_length = max(
+            env_cfg.terrain.terrain_length,
+            30.0,
+        )
         env_cfg.terrain.terrain_proportions = [1.0, 0.0, 0.0, 0.0, 0.0]
         env_cfg.terrain.num_cols = 1
         env_cfg.viewer.pos = [-1.20, -1.80, 0.90]
@@ -172,8 +195,13 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         env_cfg.terrain.up_down_stairs = False
         env_cfg.terrain.continuous_uneven = False
         env_cfg.terrain.fixed_slope_angle_deg = args.slope_angle_deg
+        env_cfg.terrain.continuous_up_stairs = False
         env_cfg.terrain.slope_ramp_start_distance = 2.5
         env_cfg.terrain.spawn_offset_x = 1.0
+        env_cfg.terrain.terrain_length = max(
+            env_cfg.terrain.terrain_length,
+            30.0,
+        )
         env_cfg.terrain.num_cols = 1
         # Preserve a 45-degree surface during heightfield-to-mesh conversion.
         env_cfg.terrain.slope_treshold = max(
@@ -216,6 +244,27 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+    obs = env.get_observations()
+
+    # Runner construction resets the environment while loading a checkpoint,
+    # so acceptance geometry must be anchored only after that final reset.
+    initial_root_x = env.root_states[:, 0].clone()
+    initial_root_z = env.root_states[:, 2].clone()
+    terrain_length = float(env_cfg.terrain.terrain_length)
+    tile_start_x = torch.floor(initial_root_x / terrain_length) * terrain_length
+    if args.play_terrain == "stairs":
+        obstacle_start_x = tile_start_x + 3.5
+    elif args.play_terrain == "slope":
+        obstacle_start_x = tile_start_x + 2.5
+    else:
+        obstacle_start_x = torch.full(
+            (env.num_envs,), float("inf"), device=env.device
+        )
+    obstacle_entered = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    obstacle_entry_root_x = torch.full_like(initial_root_x, float("nan"))
+    failed_after_entry = torch.zeros_like(obstacle_entered)
+    first_entry_step = None
+    all_entry_step = None
 
 
     # export policy as a jit module (used to run it from C++)
@@ -256,6 +305,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             "terrain_type": [],
             "done": [],
             "payload_mass_kg": [],
+            "obstacle_entered": [],
         }
 
     video_process = None
@@ -274,15 +324,27 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         ffmpeg_env = os.environ.copy()
         ffmpeg_env["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
         if args.play_terrain == "slope":
-            scene_line = f"Scene  slope {args.slope_angle_deg:g} deg"
+            scene_line = (
+                f"Scene  continuous uphill slope {args.slope_angle_deg:g} deg"
+            )
         elif args.play_terrain == "stairs":
-            scene_line = f"Scene  stairs {args.stair_step_height * 100.0:g} cm"
+            scene_line = (
+                "Scene  continuous uphill stairs "
+                f"{args.stair_step_height * 100.0:g} cm"
+            )
         elif args.play_terrain == "uneven":
             level = args.terrain_level if args.terrain_level is not None else 9
             scene_line = f"Scene  continuous uneven level {level}"
         else:
             scene_line = f"Scene  {args.play_terrain}"
-        if args.command_switch_time_s is None:
+        if args.command_switch_on_obstacle_entry:
+            hold_s = args.post_entry_seconds
+            hold_text = "after entry" if hold_s is None else f"for {hold_s:g} s"
+            command_lines = (
+                f"Approach  {x_vel:g} m/s until obstacle entry\n"
+                f"Hold  {after_command[0]:g} m/s {hold_text}"
+            )
+        elif args.command_switch_time_s is None:
             command_lines = f"Command  {x_vel:g} m/s"
         else:
             hold_s = max(args.video_seconds - args.command_switch_time_s, 0.0)
@@ -290,10 +352,21 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
                 f"Approach  {x_vel:g} m/s for {args.command_switch_time_s:g} s\n"
                 f"Hold  {after_command[0]:g} m/s for {hold_s:g} s"
             )
+        checkpoint_label = "latest" if args.checkpoint is None else str(args.checkpoint)
+        payload_label = (
+            "training default"
+            if args.acceptance_payload_kg is None
+            else f"{args.acceptance_payload_kg:g} kg"
+        )
+        friction_label = (
+            "asset default"
+            if args.acceptance_friction is None
+            else f"{args.acceptance_friction:g}"
+        )
         subtitle_text = (
-            "Solo12 v3.1  model 11620  payload 10 kg\n"
+            f"Solo12 v3.1  model {checkpoint_label}  payload {payload_label}\n"
             "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS06 3-to-1\n"
-            f"{scene_line} | seed {args.seed}\n"
+            f"{scene_line} | friction {friction_label} | seed {args.seed}\n"
             f"{command_lines}"
         )
         video_subtitle_file = tempfile.NamedTemporaryFile(
@@ -339,8 +412,34 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         env.commands[:, 0] = float(active_command[0])
         env.commands[:, 1] = float(active_command[1])
         env.commands[:, 2] = float(active_command[2])
+        if args.command_switch_on_obstacle_entry and obstacle_entered.any():
+            env.commands[obstacle_entered, 0] = float(after_command[0])
+            env.commands[obstacle_entered, 1] = float(after_command[1])
+            env.commands[obstacle_entered, 2] = float(after_command[2])
         actions = policy(obs.detach())
         obs, _, rews, dones, infos, _, _ = env.step(actions.detach())
+        entered_before_step = obstacle_entered.clone()
+        entered_this_step = (
+            (env.root_states[:, 0] >= obstacle_start_x)
+            & (env.root_states[:, 2] - initial_root_z >= args.obstacle_entry_height_m)
+        )
+        newly_entered = entered_this_step & ~obstacle_entered
+        obstacle_entry_root_x[newly_entered] = env.root_states[newly_entered, 0]
+        obstacle_entered |= entered_this_step
+        if first_entry_step is None and obstacle_entered.any():
+            first_entry_step = i + 1
+            print(
+                "Verified obstacle entry at "
+                f"{first_entry_step * env.dt:.3f} s "
+                f"(base-height rise >= {args.obstacle_entry_height_m:.3f} m)"
+            )
+        if all_entry_step is None and obstacle_entered.all():
+            all_entry_step = i + 1
+            print(
+                "Verified all environments entered the obstacle by "
+                f"{all_entry_step * env.dt:.3f} s"
+            )
+        failed_after_entry |= dones & entered_before_step
 
         if video_process is not None and i % video_stride == 0:
             env.gym.fetch_results(env.sim, True)
@@ -443,6 +542,16 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             acceptance_trace["payload_mass_kg"].append(
                 env.payload.detach().cpu().numpy().copy()
             )
+            acceptance_trace["obstacle_entered"].append(
+                obstacle_entered.detach().cpu().numpy().copy()
+            )
+
+        if (
+            all_entry_step is not None
+            and args.post_entry_seconds is not None
+            and (i + 1 - all_entry_step) * env.dt >= args.post_entry_seconds
+        ):
+            break
 
         if RECORD_FRAMES:
             if i % 2:
@@ -483,6 +592,25 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     if acceptance_trace is not None:
         trace_path = os.path.abspath(args.acceptance_trace)
         os.makedirs(os.path.dirname(trace_path), exist_ok=True)
+        stall_motor_torques_nm = np.full(env.num_dof, np.nan, dtype=float)
+        stall_motor_torque_sources = np.full(env.num_dof, "", dtype="U96")
+        stall_rated_by_family = env_cfg.control.stall_rated_motor_torques_nm
+        for dof_id, dof_name in enumerate(env.dof_names):
+            for joint_family, stall_rated_nm in stall_rated_by_family.items():
+                if joint_family == "joint" or joint_family in dof_name:
+                    stall_motor_torques_nm[dof_id] = float(stall_rated_nm)
+                    stall_motor_torque_sources[dof_id] = (
+                        f"{joint_family} official manual stall-overload rated row"
+                    )
+                    break
+        if np.isnan(stall_motor_torques_nm).any():
+            missing = [
+                env.dof_names[i]
+                for i in np.flatnonzero(np.isnan(stall_motor_torques_nm))
+            ]
+            raise ValueError(
+                "Missing manual stall-rated torque for joints: " + ", ".join(missing)
+            )
         np.savez_compressed(
             trace_path,
             joint_torque_nm=np.asarray(acceptance_trace["joint_torque_nm"]),
@@ -507,6 +635,22 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             terrain_type=np.asarray(acceptance_trace["terrain_type"]),
             done=np.asarray(acceptance_trace["done"]),
             payload_mass_kg=np.asarray(acceptance_trace["payload_mass_kg"]),
+            obstacle_entered=np.asarray(acceptance_trace["obstacle_entered"]),
+            obstacle_entry_time_s=np.asarray(
+                -1.0 if first_entry_step is None else first_entry_step * env.dt
+            ),
+            obstacle_all_entry_time_s=np.asarray(
+                -1.0 if all_entry_step is None else all_entry_step * env.dt
+            ),
+            obstacle_start_world_x_m=obstacle_start_x.detach().cpu().numpy(),
+            obstacle_entry_height_m=np.asarray(args.obstacle_entry_height_m),
+            obstacle_entry_required=np.asarray(args.require_obstacle_entry),
+            obstacle_entry_root_x_m=obstacle_entry_root_x.detach().cpu().numpy(),
+            minimum_post_entry_progress_m=np.asarray(
+                -1.0
+                if args.minimum_post_entry_progress_m is None
+                else args.minimum_post_entry_progress_m
+            ),
             dt_s=np.asarray(env.dt),
             dof_names=np.asarray(env.dof_names),
             foot_names=np.asarray(env.feet_names),
@@ -520,9 +664,8 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             rated_motor_torques_nm=env.rated_motor_torques_nm.detach().cpu().numpy(),
             joint_gear_ratios=env.joint_gear_ratios.detach().cpu().numpy(),
             hard_joint_speed_rad_s=env.dof_vel_limits.detach().cpu().numpy(),
-            stall_motor_torques_nm=(
-                env.torque_limits / env.joint_gear_ratios
-            ).detach().cpu().numpy(),
+            stall_motor_torques_nm=stall_motor_torques_nm,
+            stall_motor_torque_sources=stall_motor_torque_sources,
             base_height_target_m=np.asarray(env_cfg.rewards.base_height_target),
             acceptance_randomization=np.asarray(args.acceptance_randomization),
             acceptance_payload_kg=np.asarray(
@@ -534,6 +677,14 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             acceptance_restitution=np.asarray(
                 -1.0 if args.acceptance_restitution is None else args.acceptance_restitution
             ),
+            acceptance_friction=np.asarray(
+                -1.0 if args.acceptance_friction is None else args.acceptance_friction
+            ),
+            actual_robot_friction=np.asarray(
+                env.friction_coeffs.detach().cpu().numpy()
+            ),
+            play_terrain=np.asarray(args.play_terrain),
+            slope_angle_deg=np.asarray(args.slope_angle_deg),
             command_switch_time_s=np.asarray(
                 -1.0 if args.command_switch_time_s is None else args.command_switch_time_s
             ),
@@ -553,7 +704,11 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
                 "--torque-output", os.path.abspath(args.motor_torque_plot),
                 "--speed-output", os.path.abspath(args.motor_speed_plot),
                 "--comparison", args.torque_comparison,
-                "--start-seconds", str(args.analysis_start_seconds),
+                "--start-seconds", str(
+                    all_entry_step * env.dt
+                    if args.analysis_start_after_entry and all_entry_step is not None
+                    else args.analysis_start_seconds
+                ),
                 "--title", args.acceptance_title,
             ]
             if args.motor_metrics:
@@ -570,6 +725,29 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
         if return_code != 0:
             raise RuntimeError(f"ffmpeg exited with status {return_code}")
         print("Saved play video:", video_path)
+
+    if args.require_obstacle_entry:
+        entry_fraction = obstacle_entered.float().mean().item()
+        print(f"Obstacle entry gate: {entry_fraction:.1%} of environments entered")
+        if not obstacle_entered.all():
+            raise RuntimeError(
+                "Obstacle entry gate failed: at least one environment never climbed "
+                f"{args.obstacle_entry_height_m:.3f} m above its spawn height"
+            )
+        if failed_after_entry.any():
+            raise RuntimeError("Obstacle entry gate failed: robot reset after entering")
+    if args.minimum_post_entry_progress_m is not None:
+        post_entry_progress = env.root_states[:, 0] - obstacle_entry_root_x
+        print(
+            "Post-entry progress gate: minimum "
+            f"{post_entry_progress.min().item():.3f} m, required "
+            f"{args.minimum_post_entry_progress_m:.3f} m"
+        )
+        if (post_entry_progress < args.minimum_post_entry_progress_m).any():
+            raise RuntimeError(
+                "Post-entry progress gate failed: at least one environment did not "
+                f"advance {args.minimum_post_entry_progress_m:.3f} m after entry"
+            )
 
 if __name__ == '__main__':
     EXPORT_POLICY = True

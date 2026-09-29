@@ -70,6 +70,7 @@ class LeggedRobotCfg(BaseConfig):
         fixed_init_level = None # validation-only fixed curriculum row
         spawn_offset_x = None # validation-only spawn position within a terrain tile
         up_down_stairs = False # validation-only repeated stair course
+        continuous_up_stairs = False # validation-only approach followed by uninterrupted ascent
         up_down_stair_height = 0.04
         up_down_stair_height_range = None # optional curriculum min/max
         mixed_plane_probability = 0.0
@@ -139,6 +140,9 @@ class LeggedRobotCfg(BaseConfig):
         torque_speed_envelope_scales = {}
         rated_motor_torque_nm = 0.0
         rated_motor_torques_nm = {}
+        # Continuous torque while the output is stalled. This is distinct from
+        # both the rotating rated torque and the zero-rpm peak envelope.
+        stall_rated_motor_torques_nm = {}
 
     class asset:
         file = ""
@@ -172,6 +176,8 @@ class LeggedRobotCfg(BaseConfig):
         # Fixed actuator mass deltas selected by rigid-body-name fragment.
         # Inertia is recomputed by Isaac Gym from the body's shapes.
         body_mass_additions = {}
+        # Fixed mass placed on the base rigid body, separate from payload.
+        base_mass_addition_kg = 0.0
 
     class domain_rand:
         randomize_payload_mass = True

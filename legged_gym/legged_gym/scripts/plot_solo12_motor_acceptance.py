@@ -26,30 +26,93 @@ def _statistics(values):
     }
 
 
-def _grouped_plot(names, stats, limit, ylabel, title, output, limit_label):
-    x = np.arange(len(names))
-    width = 0.23
-    colors = {"median": "#60a5fa", "p95": "#2563eb", "max": "#1e3a8a"}
-    fig, axis = plt.subplots(figsize=(16, 7))
-    for offset, key in zip((-1, 0, 1), ("median", "p95", "max")):
-        axis.bar(x + offset * width, stats[key], width, label=key, color=colors[key])
-    axis.scatter(
-        x,
-        limit,
-        marker="_",
-        s=650,
-        linewidths=2.5,
-        color="#dc2626",
-        label=limit_label,
-        zorder=5,
+def _time_series_plot(
+    names,
+    values,
+    limit,
+    dt_s,
+    ylabel,
+    title,
+    output,
+    limit_label,
+    unit,
+):
+    """Render one time-series panel per joint, matching acceptance reports."""
+    absolute = np.abs(values)
+    per_time = {
+        "max": np.max(absolute, axis=1),
+        "p95": np.percentile(absolute, 95, axis=1),
+        "median": np.percentile(absolute, 50, axis=1),
+    }
+    within = absolute <= limit[None, None, :]
+    per_joint_within = np.mean(within, axis=(0, 1)) * 100.0
+    overall_within = float(np.mean(within) * 100.0)
+    peak = float(np.max(absolute))
+    time_s = np.arange(absolute.shape[0]) * dt_s
+    env_count = absolute.shape[1]
+
+    fig, axes = plt.subplots(4, 3, figsize=(16, 12), sharex=True, sharey=True)
+    axes = axes.reshape(-1)
+    colors = {"max": "#cbd5e1", "p95": "#e85d32", "median": "#1f77b4"}
+    for joint_id, (axis, name) in enumerate(zip(axes, names)):
+        axis.plot(
+            time_s,
+            per_time["max"][:, joint_id],
+            color=colors["max"],
+            linewidth=0.7,
+            alpha=0.75,
+        )
+        axis.plot(
+            time_s,
+            per_time["p95"][:, joint_id],
+            color=colors["p95"],
+            linewidth=1.0,
+        )
+        axis.plot(
+            time_s,
+            per_time["median"][:, joint_id],
+            color=colors["median"],
+            linewidth=1.1,
+        )
+        axis.axhline(
+            limit[joint_id],
+            color="#262626",
+            linestyle="--",
+            linewidth=1.0,
+        )
+        axis.set_title(
+            f"{name}   <{limit[joint_id]:g} {unit}: "
+            f"{per_joint_within[joint_id]:.1f}%",
+            fontsize=9,
+        )
+        axis.grid(alpha=0.22)
+
+    for row in range(4):
+        axes[row * 3].set_ylabel(ylabel)
+    for axis in axes[-3:]:
+        axis.set_xlabel("Time (s)")
+
+    subtitle = (
+        f"overall below per-joint {limit_label}: {overall_within:.1f}%; "
+        f"peak: {peak:.2f} {unit}"
     )
-    axis.set_xticks(x)
-    axis.set_xticklabels(names, rotation=35, ha="right")
-    axis.set_ylabel(ylabel)
-    axis.set_title(title)
-    axis.grid(axis="y", alpha=0.25)
-    axis.legend(ncol=4)
-    fig.tight_layout()
+    fig.suptitle(f"{title}\n{subtitle}", fontsize=14, y=0.985)
+    legend_labels = [
+        f"max across {env_count} env{'s' if env_count != 1 else ''}",
+        f"P95 across {env_count} env{'s' if env_count != 1 else ''}",
+        f"median across {env_count} env{'s' if env_count != 1 else ''}",
+        limit_label,
+    ]
+    fig.legend(
+        axes[0].lines[:4],
+        legend_labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.945),
+        ncol=4,
+        frameon=False,
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0.025, 0.035, 0.995, 0.90))
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
     fig.savefig(output, dpi=180)
     plt.close(fig)
@@ -85,6 +148,44 @@ def main():
         payload = np.asarray(trace["payload_mass_kg"], dtype=float)
         base_velocity = np.asarray(trace["base_lin_vel_m_s"], dtype=float)
         command = np.asarray(trace["command_velocity"], dtype=float)
+        root_position = np.asarray(trace["root_position_m"], dtype=float)
+        foot_velocity = np.asarray(trace["foot_velocity_m_s"], dtype=float)
+        foot_contact = np.asarray(trace["foot_contact"]).astype(bool)
+        acceptance_friction = (
+            float(np.asarray(trace["acceptance_friction"]).reshape(()))
+            if "acceptance_friction" in trace
+            else -1.0
+        )
+        actual_robot_friction = (
+            np.asarray(trace["actual_robot_friction"], dtype=float).reshape(-1)
+            if "actual_robot_friction" in trace
+            else np.asarray([], dtype=float)
+        )
+        play_terrain = (
+            str(np.asarray(trace["play_terrain"]).reshape(()))
+            if "play_terrain" in trace
+            else "unknown"
+        )
+        slope_angle_deg = (
+            float(np.asarray(trace["slope_angle_deg"]).reshape(()))
+            if "slope_angle_deg" in trace
+            else 0.0
+        )
+        obstacle_entry = (
+            np.asarray(trace["obstacle_entered"]).astype(bool)
+            if "obstacle_entered" in trace
+            else None
+        )
+        obstacle_entry_time_s = (
+            float(np.asarray(trace["obstacle_entry_time_s"]).reshape(()))
+            if "obstacle_entry_time_s" in trace
+            else -1.0
+        )
+        obstacle_entry_required = (
+            bool(np.asarray(trace["obstacle_entry_required"]).reshape(()))
+            if "obstacle_entry_required" in trace
+            else False
+        )
 
     start_step = int(round(args.start_seconds / dt_s))
     if start_step < 0 or start_step >= joint_torque.shape[0]:
@@ -94,6 +195,9 @@ def main():
     done = done[start_step:]
     base_velocity = base_velocity[start_step:]
     command = command[start_step:]
+    root_position = root_position[start_step:]
+    foot_velocity = foot_velocity[start_step:]
+    foot_contact = foot_contact[start_step:]
 
     motor_torque = joint_torque / ratios[None, None, :]
     motor_speed_rpm = (
@@ -101,27 +205,54 @@ def main():
     )
     hard_motor_speed_rpm = hard_joint_speed * ratios * 60.0 / (2.0 * np.pi)
     torque_reference = rated if args.comparison == "rated" else stall
-    torque_reference_name = "rated torque" if args.comparison == "rated" else "stall torque"
+    torque_reference_name = (
+        "rated torque"
+        if args.comparison == "rated"
+        else "manual stall-rated torque"
+    )
 
     torque_stats = _statistics(motor_torque)
     speed_stats = _statistics(motor_speed_rpm)
-    _grouped_plot(
+    progress_x = root_position[-1, :, 0] - root_position[0, :, 0]
+    progress_z = root_position[-1, :, 2] - root_position[0, :, 2]
+    commanded_distance = np.sum(np.maximum(command[:, :, 0], 0.0), axis=0) * dt_s
+    progress_ratio = np.divide(
+        progress_x,
+        commanded_distance,
+        out=np.full_like(progress_x, np.nan),
+        where=commanded_distance > 1e-6,
+    )
+    if play_terrain == "slope":
+        slope_rad = np.deg2rad(slope_angle_deg)
+        terrain_normal = np.asarray([-np.sin(slope_rad), 0.0, np.cos(slope_rad)])
+    else:
+        terrain_normal = np.asarray([0.0, 0.0, 1.0])
+    normal_speed = np.sum(foot_velocity * terrain_normal, axis=-1)
+    tangential_speed = np.sqrt(
+        np.maximum(np.sum(foot_velocity ** 2, axis=-1) - normal_speed ** 2, 0.0)
+    )
+    contact_slip_speed = tangential_speed[foot_contact]
+    _time_series_plot(
         names,
-        torque_stats,
+        motor_torque,
         torque_reference,
+        dt_s,
         "Motor torque magnitude (Nm)",
-        f"{args.title}: motor torque vs {torque_reference_name}",
+        f"{args.title}\nMotor-side torque",
         args.torque_output,
         torque_reference_name,
+        "Nm",
     )
-    _grouped_plot(
+    _time_series_plot(
         names,
-        speed_stats,
+        motor_speed_rpm,
         hard_motor_speed_rpm,
+        dt_s,
         "Motor speed magnitude (rpm)",
-        f"{args.title}: motor speed",
+        f"{args.title}\nMotor-side speed",
         args.speed_output,
-        "hard speed limit",
+        "motor speed limit",
+        "rpm",
     )
 
     metrics = {
@@ -134,8 +265,49 @@ def main():
         "base_velocity_mean_m_s": np.mean(base_velocity, axis=(0, 1)).tolist(),
         "falls_or_resets": int(done.sum()),
         "torque_comparison": args.comparison,
+        "contact_friction": {
+            "requested": None if acceptance_friction < 0.0 else acceptance_friction,
+            "robot_shape_min": (
+                None if actual_robot_friction.size == 0 else float(actual_robot_friction.min())
+            ),
+            "robot_shape_max": (
+                None if actual_robot_friction.size == 0 else float(actual_robot_friction.max())
+            ),
+        },
+        "terrain_motion": {
+            "terrain": play_terrain,
+            "slope_angle_deg": slope_angle_deg,
+            "forward_progress_m": {
+                "min": float(progress_x.min()),
+                "mean": float(progress_x.mean()),
+                "max": float(progress_x.max()),
+            },
+            "vertical_progress_m": {
+                "min": float(progress_z.min()),
+                "mean": float(progress_z.mean()),
+                "max": float(progress_z.max()),
+            },
+            "forward_progress_ratio": {
+                "min": None if np.all(np.isnan(progress_ratio)) else float(np.nanmin(progress_ratio)),
+                "mean": None if np.all(np.isnan(progress_ratio)) else float(np.nanmean(progress_ratio)),
+                "max": None if np.all(np.isnan(progress_ratio)) else float(np.nanmax(progress_ratio)),
+            },
+            "contact_foot_slip_m_s": {
+                "samples": int(contact_slip_speed.size),
+                "median": None if contact_slip_speed.size == 0 else float(np.percentile(contact_slip_speed, 50)),
+                "p95": None if contact_slip_speed.size == 0 else float(np.percentile(contact_slip_speed, 95)),
+                "max": None if contact_slip_speed.size == 0 else float(np.max(contact_slip_speed)),
+            },
+        },
         "joints": {},
     }
+    if obstacle_entry is not None:
+        metrics["obstacle_entry"] = {
+            "required": obstacle_entry_required,
+            "first_entry_s": obstacle_entry_time_s,
+            "entered_environments": int(obstacle_entry[-1].sum()),
+            "entry_fraction": float(obstacle_entry[-1].mean()),
+        }
     for joint_id, name in enumerate(names):
         metrics["joints"][name] = {
             "gear_ratio": float(ratios[joint_id]),

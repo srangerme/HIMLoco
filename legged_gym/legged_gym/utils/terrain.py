@@ -180,6 +180,20 @@ class Terrain:
             if start_distance is None:
                 start_distance = 2.5
             inclined_ramp_terrain(terrain, fixed_slope_angle, start_distance)
+        elif getattr(self.cfg, "continuous_up_stairs", False):
+            height_range = getattr(self.cfg, "up_down_stair_height_range", None)
+            if height_range is None:
+                stair_height = self.cfg.up_down_stair_height
+            else:
+                stair_height = height_range[0] + difficulty * (
+                    height_range[1] - height_range[0]
+                )
+            continuous_up_stairs_terrain(
+                terrain,
+                step_width=geometry_scale * 0.30,
+                step_height=stair_height,
+                start_distance=3.5,
+            )
         elif getattr(self.cfg, "up_down_stairs", False):
             height_range = getattr(self.cfg, "up_down_stair_height_range", None)
             if height_range is None:
@@ -286,6 +300,20 @@ def up_down_stairs_terrain(terrain, step_width, step_height, start_distance,
         0,
     )
     levels[active] = active_levels
+    raw_step = int(np.round(step_height / terrain.vertical_scale))
+    terrain.height_field_raw[:, :] = (levels * raw_step)[:, None]
+
+
+def continuous_up_stairs_terrain(terrain, step_width, step_height,
+                                 start_distance):
+    """Flat launch area followed by stairs that rise to the end of the tile."""
+    x_m = np.arange(terrain.width) * terrain.horizontal_scale
+    levels = np.zeros(terrain.width, dtype=np.int32)
+    active = x_m >= start_distance
+    levels[active] = (
+        np.floor((x_m[active] - start_distance) / step_width).astype(np.int32)
+        + 1
+    )
     raw_step = int(np.round(step_height / terrain.vertical_scale))
     terrain.height_field_raw[:, :] = (levels * raw_step)[:, None]
 

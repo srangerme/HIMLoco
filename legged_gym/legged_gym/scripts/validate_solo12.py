@@ -44,7 +44,10 @@ RS06_STAGES = {
 RS03_THIGH_STAGES = {
     "solo12_v3_1_rs03_thigh_payload_10_obstacle_adapt": [0.0, 1.0],
     "solo12_v3_1_rs03_thigh_payload_10_speed20_adapt": [1.0, 2.0],
-    "solo12_v3_1_rs03_thigh_payload_10_slope_adapt": [0.0, 0.7],
+    "solo12_v3_1_rs03_thigh_payload_10_speed_limit_polish": [1.0, 2.0],
+    "solo12_v3_1_rs03_thigh_payload_10_slope_warmup": [0.25, 0.55],
+    "solo12_v3_1_rs03_thigh_payload_10_slope_bridge": [0.35, 0.65],
+    "solo12_v3_1_rs03_thigh_payload_10_slope_adapt": [0.45, 0.7],
 }
 
 

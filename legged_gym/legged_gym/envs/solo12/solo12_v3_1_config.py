@@ -1151,7 +1151,7 @@ RS03_THIGH_TORQUE_SPEED_CURVE = {
 class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
     Solo12V31RS06Thigh3StraightObstacleReplayConfig
 ):
-    """Move the 3:1 obstacle policy to RS03 thighs with no external stage."""
+    """Common RS03 +10 kg adaptation base for later capability branches."""
 
     class control(Solo12V31RS06Thigh3StraightObstacleReplayConfig.control):
         joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
@@ -1160,6 +1160,8 @@ class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
             "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
         }
         rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+        # Rated rows in the official 2026-07-13 manual stall-overload tables.
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 8.0}
 
     class asset(Solo12V31RS06Thigh3StraightObstacleReplayConfig.asset):
         dof_velocity_limits = {
@@ -1167,7 +1169,8 @@ class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {"thigh": 0.761}
+        body_mass_additions = {}
+        base_mass_addition_kg = 3.044
 
     class domain_rand(Solo12V31RS06Thigh3StraightObstacleReplayConfig.domain_rand):
         armature_ranges = {
@@ -1184,7 +1187,7 @@ class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
 class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
     Solo12V31RS06Thigh3Speed20AdaptConfig
 ):
-    """Move the 3:1 2 m/s policy to RS03 thighs with no external stage."""
+    """Specialize the common RS03 base for 1--2 m/s plane and uneven motion."""
 
     class control(Solo12V31RS06Thigh3Speed20AdaptConfig.control):
         joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
@@ -1193,6 +1196,7 @@ class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
             "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
         }
         rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 8.0}
 
     class asset(Solo12V31RS06Thigh3Speed20AdaptConfig.asset):
         dof_velocity_limits = {
@@ -1200,7 +1204,8 @@ class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {"thigh": 0.761}
+        body_mass_additions = {}
+        base_mass_addition_kg = 3.044
 
     class domain_rand(Solo12V31RS06Thigh3Speed20AdaptConfig.domain_rand):
         armature_ranges = {
@@ -1214,10 +1219,22 @@ class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
             lin_vel_x = [1.0, 2.0]
 
 
+class Solo12V31RS03ThighPayload100SpeedLimitPolishConfig(
+    Solo12V31RS03ThighPayload100Speed20AdaptConfig
+):
+    """Reduce RS03 thigh overspeed impacts on high-speed uneven terrain."""
+
+    class rewards(Solo12V31RS03ThighPayload100Speed20AdaptConfig.rewards):
+        soft_dof_vel_limit = 0.85
+
+        class scales(Solo12V31RS03ThighPayload100Speed20AdaptConfig.rewards.scales):
+            dof_vel_limits = -1.0
+
+
 class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
     Solo12V31RS06Thigh3StraightSlopeAdaptConfig
 ):
-    """Move the 3:1 35--45 degree slope policy to RS03 thighs at 1:1."""
+    """Specialize the common RS03 base for 35--45 degree ramp motion."""
 
     class control(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.control):
         joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
@@ -1226,6 +1243,7 @@ class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
             "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
         }
         rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 8.0}
 
     class asset(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.asset):
         dof_velocity_limits = {
@@ -1233,7 +1251,8 @@ class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {"thigh": 0.761}
+        body_mass_additions = {}
+        base_mass_addition_kg = 3.044
 
     class domain_rand(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.domain_rand):
         armature_ranges = {
@@ -1244,7 +1263,38 @@ class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
 
     class commands(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.commands):
         class ranges(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.commands.ranges):
-            lin_vel_x = [0.0, 0.7]
+            # Keep the training command moving so world-X curriculum progress
+            # measures ramp traversal. Static hold is tested by switching the
+            # command to zero only after verified obstacle entry.
+            lin_vel_x = [0.45, 0.7]
+
+
+class Solo12V31RS03ThighPayload100SlopeWarmupConfig(
+    Solo12V31RS03ThighPayload100SlopeAdaptConfig
+):
+    """First slope-branch stage after the common base: 20--35 degree ramps."""
+
+    class terrain(Solo12V31RS03ThighPayload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 3
+        mixed_slope_angle_range_deg = [20.0, 35.0]
+
+    class commands(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.25, 0.55]
+
+
+class Solo12V31RS03ThighPayload100SlopeBridgeConfig(
+    Solo12V31RS03ThighPayload100SlopeAdaptConfig
+):
+    """Second slope-branch stage: bridge 28--42 degrees before final polish."""
+
+    class terrain(Solo12V31RS03ThighPayload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 4
+        mixed_slope_angle_range_deg = [28.0, 42.0]
+
+    class commands(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.35, 0.65]
 
 
 class Solo12V31RS06Payload100HardReplayConfig(

@@ -6,13 +6,17 @@
 - Thigh: RS03 at 48 V, no external reduction (`1:1`).
 - Calf: RS06 at 48 V with the existing external `3:1` stage.
 - Payload randomization: `[0, 10] kg`, with 50% exact replay at `10 kg`.
+  This payload is added to the base rigid body at its existing center of mass.
 
 The RS03 model uses the official 2026-07-13 48 V peak torque-speed plot,
 `60 Nm` peak torque, a conservative `20 Nm` continuous-duty objective, and a
-`195 rpm` zero-torque speed endpoint.  The product mass is `0.900 kg`; relative
-to the original `0.380 kg` RS02, `0.520 kg` is added to every thigh link.  The
-existing `0.241 kg` RS06-for-RS02 calf actuator delta is mounted on that link as
-well, so the total fixed thigh-link addition is `0.761 kg`.
+`195 rpm` zero-torque speed endpoint.  The RS03-minus-RS02 thigh actuator delta
+is `0.520 kg` per leg and the RS06-minus-RS02 calf actuator delta is `0.241 kg`
+per leg.  For this hardware study, the combined `0.761 kg` per leg is not
+placed on a thigh or calf rigid body; all four legs' `3.044 kg` actuator delta
+is placed on the base rigid body.  At the fixed `10 kg` acceptance endpoint,
+the base therefore carries `13.044 kg` total additional mass while total robot
+mass remains unchanged from the earlier distributed-mass model.
 
 Sources:
 
@@ -22,11 +26,12 @@ Sources:
 ## Adaptation runs
 
 The finalized predecessor hardware is Hip RS02 `1:1`, Thigh RS02 `3:1`, and
-Calf RS06 `3:1`.  Its obstacle, high-speed, and ramp capabilities live in three
-separate policies, so the RS03 handoff preserves the same split instead of
-forcing one policy to cover every scene.
+Calf RS06 `3:1`.  Adapt the hardware and payload once with the general obstacle
+policy, then use that new RS03 checkpoint as the common parent for the separate
+high-speed and ramp capabilities.  This keeps one shared hardware-adaptation
+stage without forcing the final capabilities into one policy.
 
-Obstacle chain (`10900` -> `11100`):
+Common RS03 base (`10900` -> `11100`):
 
 ```bash
 python3 -m trains.cli train himloco-ada \
@@ -38,34 +43,118 @@ python3 -m trains.cli train himloco-ada \
   --run_name rs03_obstacle_adapt_10900_to11100
 ```
 
-High-speed chain (`11200` -> `11400`):
+High-speed branch from the common RS03 base (`11100` -> `11300`):
 
 ```bash
 python3 -m trains.cli train himloco-ada \
   --task solo12_v3_1_rs03_thigh_payload_10_speed20_adapt \
   --num_envs 4096 --max_iterations 200 --seed 1 \
   --resume \
-  --load_run Sep24_07-33-27_rs06_thigh3_speed20_11100_plus100 \
-  --checkpoint 11200 \
-  --run_name rs03_speed20_adapt_11200_to11400
+  --load_run Sep29_09-31-42_rs03_obstacle_adapt_10900_to11100 \
+  --checkpoint 11100 \
+  --run_name rs03_speed20_from_base_11100_to11300
 ```
 
-Slope chain (`11300` -> `11500`):
+The first acceptance pass found contact-driven RS03 thigh overspeed on level-9
+uneven terrain.  Continue the speed branch with an 85% soft-speed threshold and
+explicit velocity-limit penalty (`11300` -> `11400`):
+
+```bash
+python3 -m trains.cli train himloco-ada \
+  --task solo12_v3_1_rs03_thigh_payload_10_speed_limit_polish \
+  --num_envs 4096 --max_iterations 100 --seed 1 \
+  --resume \
+  --load_run Sep29_09-50-19_rs03_speed20_from_base_11100_to11300 \
+  --checkpoint 11300 \
+  --run_name rs03_speed_limit_polish_11300_to11400
+```
+
+Slope branch from the common RS03 base.  Do not jump directly into the final
+35--45 degree distribution: the attempted direct run stayed at curriculum
+level zero.  Use three stages inside this one capability branch.
+
+Warm up on 20--35 degree ramps (`11100` -> `11200`):
+
+```bash
+python3 -m trains.cli train himloco-ada \
+  --task solo12_v3_1_rs03_thigh_payload_10_slope_warmup \
+  --num_envs 4096 --max_iterations 100 --seed 1 \
+  --resume \
+  --load_run Sep29_09-31-42_rs03_obstacle_adapt_10900_to11100 \
+  --checkpoint 11100 \
+  --run_name rs03_slope_warmup_from_base_11100_to11200
+```
+
+Bridge on 28--42 degree ramps (`11200` -> `11300`):
+
+```bash
+python3 -m trains.cli train himloco-ada \
+  --task solo12_v3_1_rs03_thigh_payload_10_slope_bridge \
+  --num_envs 4096 --max_iterations 100 --seed 1 \
+  --resume \
+  --load_run Sep29_10-15-31_rs03_slope_warmup_from_base_11100_to11200 \
+  --checkpoint 11200 \
+  --run_name rs03_slope_bridge_11200_to11300
+```
+
+Polish on 35--45 degree ramps (`11300` -> `11400`):
 
 ```bash
 python3 -m trains.cli train himloco-ada \
   --task solo12_v3_1_rs03_thigh_payload_10_slope_adapt \
-  --num_envs 4096 --max_iterations 200 --seed 1 \
+  --num_envs 4096 --max_iterations 100 --seed 1 \
   --resume \
-  --load_run Sep24_06-25-20_rs06_thigh3_slope_adapt_11200_plus100 \
+  --load_run Sep29_10-23-16_rs03_slope_bridge_11200_to11300 \
   --checkpoint 11300 \
-  --run_name rs03_slope_adapt_11300_to11500
+  --run_name rs03_slope_final_moving_11300_to11400
 ```
 
-All three tasks preserve the policy observation/action layout and therefore
-support checkpoint continuation without network surgery.  The earlier
+The final slope training command range is `0.45--0.7 m/s`; zero-speed samples
+are intentionally excluded because they cannot satisfy the world-X traversal
+curriculum.  Static slope acceptance switches to zero only after verified ramp
+entry.
+
+The resulting run directories are:
+
+- common base: `Sep29_09-31-42_rs03_obstacle_adapt_10900_to11100`;
+- high speed: `Sep29_09-50-19_rs03_speed20_from_base_11100_to11300`;
+- speed-limit polish: `Sep29_11-02-51_rs03_speed_limit_polish_11300_to11400`;
+- slope warmup: `Sep29_10-15-31_rs03_slope_warmup_from_base_11100_to11200`;
+- slope bridge: `Sep29_10-23-16_rs03_slope_bridge_11200_to11300`;
+- slope final: `Sep29_10-35-56_rs03_slope_final_moving_11300_to11400`.
+
+All stages preserve the policy observation/action layout and therefore
+support checkpoint continuation without network surgery.  Finish and verify
+the common base before launching either branch.  The earlier
 `11420 -> 11620` experiment used the obsolete RS02-thigh `2:1` parent and is
-diagnostic-only; it is not a deployment or acceptance candidate.
+diagnostic-only; it is not a deployment or acceptance candidate.  The
+interrupted direct 35--45 degree run
+`Sep29_10-07-44_rs03_slope_from_base_11100_to11300` is also diagnostic-only.
+
+## Base-mass redistribution adaptation
+
+After moving the fixed `3.044 kg` actuator delta from the four thigh links to
+the base, adapt once with the common obstacle policy and branch from that new
+checkpoint.  The objective is a majority-pass capability probe, not a policy
+that hides hardware limits by repeatedly optimizing isolated failures.
+
+Final candidate checkpoints:
+
+- common obstacle/base: `Sep29_13-37-06_rs03_body_mass_base_11100_to11200`,
+  checkpoint `11200` (100 iterations);
+- high-speed/uneven: `Sep29_14-03-54_rs03_body_mass_speed_polish_11300_to11400`,
+  checkpoint `11400` (200 branch iterations total);
+- slope warmup: `Sep29_14-15-19_rs03_body_mass_slope_warmup_11250_to11300`,
+  checkpoint `11300` (100 warmup iterations total);
+- slope bridge: `Sep29_14-19-45_rs03_body_mass_slope_bridge_11300_to11400`,
+  checkpoint `11400` (100 iterations);
+- final 35--45 degree slope: `Sep29_14-27-47_rs03_body_mass_slope_final_11400_to11500`,
+  checkpoint `11500` (100 iterations).
+
+The 50-environment stopping criterion is that a clear majority completes each
+requested scene.  A few resets, obstacle-entry misses, or impact-driven speed
+spikes are retained as actuator capability evidence rather than used to
+justify indefinite policy polishing.
 
 ## Acceptance gates
 
@@ -84,4 +173,34 @@ success.
 
 Acceptance traces must report thigh gear ratio `1.0`, thigh hard speed limit
 `20.420352248333657 rad/s`, thigh peak torque limit `60 Nm`, and fixed payload
-`10.0 kg`.
+`10.0 kg` on the base rigid body.
+
+## Base-mass candidate result
+
+The final 50-environment capability probe uses the common checkpoint `11200`,
+speed checkpoint `11400`, and slope checkpoint `11500` listed above.
+
+- Plane `1.0/1.5/2.0 m/s`: zero resets, with mean forward speed
+  `0.948/1.381/1.728 m/s`.
+- Uneven level 9 `1.0/1.5/2.0 m/s`: `2/6/13` reset environments, leaving
+  `48/44/37` environments without a reset; mean speed is
+  `0.903/1.265/1.511 m/s`.
+- Continuous 15 cm stairs at `0.7 m/s`: all 50 environments enter with zero
+  resets and `0.649 m/s` mean speed.
+- Plane stand for 10 s: zero resets.
+- Stair stand for 10 s: all 50 environments enter with zero resets.
+- 40 degree slope at `0.5/0.7 m/s`: all 50 environments enter with zero
+  resets; mean speed is `0.562/0.673 m/s`.
+- 45 degree slope at `0.5/0.7 m/s`: 49 of 50 environments enter, with
+  three reset environments in each scene (four reset events); mean speed is
+  `0.367/0.401 m/s`.
+
+All final traces remain inside the modeled dynamic torque-speed torque
+envelope, and every motor family's P95 torque remains below its rated torque.
+Speed is the hardware boundary: RS03 thigh P95 reaches `194.95 rpm` against a
+`195 rpm` endpoint on uneven `2.0 m/s`, with impact/backdrive peaks above the
+endpoint on uneven terrain, stairs, and steep slopes.  RS06 calf P95 reaches
+about `478.6 rpm` against its `480 rpm` limit on slopes.  The configuration is
+therefore majority-capable in simulation, but has essentially no speed margin
+for high-speed uneven terrain or steep-slope impacts; that limitation is kept
+as a module requirement rather than polished away with further training.

@@ -502,6 +502,9 @@ class LeggedRobot(BaseTask):
         # randomize base mass
         if self.cfg.domain_rand.randomize_payload_mass:
             props[0].mass = self.default_rigid_body_mass[0] + self.payload[env_id, 0]
+        props[0].mass += float(
+            getattr(self.cfg.asset, "base_mass_addition_kg", 0.0)
+        )
             
         if self.cfg.domain_rand.randomize_com_displacement:
             props[0].com = gymapi.Vec3(self.com_displacement[env_id, 0], self.com_displacement[env_id, 1], self.com_displacement[env_id, 2])

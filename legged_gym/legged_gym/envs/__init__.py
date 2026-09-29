@@ -87,6 +87,9 @@ from legged_gym.envs.solo12.solo12_v3_1_config import (
     Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig,
     Solo12V31RS03ThighPayload100ObstacleAdaptConfig,
     Solo12V31RS03ThighPayload100Speed20AdaptConfig,
+    Solo12V31RS03ThighPayload100SpeedLimitPolishConfig,
+    Solo12V31RS03ThighPayload100SlopeWarmupConfig,
+    Solo12V31RS03ThighPayload100SlopeBridgeConfig,
     Solo12V31RS03ThighPayload100SlopeAdaptConfig,
     Solo12V31RS06Thigh2StraightObstacleAConfig,
     Solo12V31RS06Thigh2StraightObstacleBConfig,
@@ -179,6 +182,9 @@ task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_final_replay", Legge
 task_registry.register( "solo12_v3_1_rs06_thigh2_payload_10_uneven_torque_recovery", LeggedRobot, Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_obstacle_adapt", LeggedRobot, Solo12V31RS03ThighPayload100ObstacleAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_speed20_adapt", LeggedRobot, Solo12V31RS03ThighPayload100Speed20AdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_speed_limit_polish", LeggedRobot, Solo12V31RS03ThighPayload100SpeedLimitPolishConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_slope_warmup", LeggedRobot, Solo12V31RS03ThighPayload100SlopeWarmupConfig(), Solo12V31TargetedFinetuneCfgPPO() )
+task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_slope_bridge", LeggedRobot, Solo12V31RS03ThighPayload100SlopeBridgeConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_rs03_thigh_payload_10_slope_adapt", LeggedRobot, Solo12V31RS03ThighPayload100SlopeAdaptConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_rs06_thigh2_straight_obstacle_a", LeggedRobot, Solo12V31RS06Thigh2StraightObstacleAConfig(), Solo12V31TargetedFinetuneCfgPPO() )
 task_registry.register( "solo12_v3_1_rs06_thigh2_straight_obstacle_b", LeggedRobot, Solo12V31RS06Thigh2StraightObstacleBConfig(), Solo12V31TargetedFinetuneCfgPPO() )
