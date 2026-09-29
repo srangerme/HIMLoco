@@ -168,6 +168,12 @@ def get_args():
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--acceptance_trace", "type": str, "help": "Write actuator acceptance rollout data to an NPZ file."},
+        {"name": "--motor_torque_plot", "type": str, "help": "Write a motor-side torque summary plot after trace capture."},
+        {"name": "--motor_speed_plot", "type": str, "help": "Write a motor-side speed summary plot after trace capture."},
+        {"name": "--motor_metrics", "type": str, "help": "Write motor-side summary metrics as JSON after trace capture."},
+        {"name": "--torque_comparison", "type": str, "default": "rated", "help": "Torque plot reference: rated or stall."},
+        {"name": "--analysis_start_seconds", "type": float, "default": 0.0, "help": "Exclude trace samples before this time from plots and metrics."},
+        {"name": "--acceptance_title", "type": str, "default": "Solo12 motor acceptance", "help": "Title prefix for acceptance plots."},
         {"name": "--velocity_limit_scale", "type": float, "default": 1.0, "help": "Validation-only multiplier for hard DOF velocity limits."},
         {"name": "--video_path", "type": str, "help": "Record an offscreen MP4 during play."},
         {"name": "--video_seconds", "type": float, "default": 8.0, "help": "Length of an offscreen play video."},
@@ -186,6 +192,10 @@ def get_args():
         {"name": "--command_x", "type": float, "default": 1.0, "help": "Fixed play command in the X direction."},
         {"name": "--command_y", "type": float, "default": 0.0, "help": "Fixed play command in the Y direction."},
         {"name": "--command_yaw", "type": float, "default": 0.0, "help": "Fixed play yaw command."},
+        {"name": "--command_switch_time_s", "type": float, "help": "Switch to the optional after-command at this rollout time."},
+        {"name": "--command_x_after", "type": float, "help": "X command used after --command_switch_time_s."},
+        {"name": "--command_y_after", "type": float, "help": "Y command used after --command_switch_time_s."},
+        {"name": "--command_yaw_after", "type": float, "help": "Yaw command used after --command_switch_time_s."},
         {"name": "--initial_yaw_deg", "type": float, "default": 0.0, "help": "Initial robot heading in world degrees for validation."},
     ]
     # parse arguments

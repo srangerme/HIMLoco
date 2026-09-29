@@ -909,57 +909,6 @@ class Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig(
             rated_torque_incidence = -0.50
 
 
-class Solo12V31RS03ThighPayload100AdaptConfig(
-    Solo12V31RS06Thigh2Payload100FinalReplayConfig
-):
-    """Adapt the +10 kg policy to RS03 thighs without an external reduction."""
-
-    class control(Solo12V31RS06Thigh2Payload100FinalReplayConfig.control):
-        # Hip remains RS02 1:1 and calf remains RS06 3:1.  RS03 is already an
-        # integrated 9:1 QDD actuator, so the thigh has no additional stage.
-        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
-        torque_speed_curves = {
-            **Solo12V31RS06Thigh2Payload100FinalReplayConfig.control.torque_speed_curves,
-            # Peak-envelope samples digitized from the official 2026-07-13
-            # RS03 48 V T-N plot.  The documented 195 rpm no-load point closes
-            # the curve at zero torque.
-            "thigh": {
-                "rpm": [
-                    0.0, 60.0, 100.0, 120.0, 135.0, 150.0,
-                    165.0, 180.0, 185.0, 188.0, 190.0, 195.0,
-                ],
-                "nm": [
-                    60.0, 60.0, 60.0, 60.0, 54.5, 47.0,
-                    39.0, 28.0, 23.0, 18.0, 10.0, 0.0,
-                ],
-            },
-        }
-        # Use the manual's conservative 20 Nm continuous rating for the loss
-        # objective; the physical clamp still follows the 60 Nm peak curve.
-        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
-
-    class asset(Solo12V31RS06Thigh2Payload100FinalReplayConfig.asset):
-        dof_velocity_limits = {
-            "thigh": 20.420352248333657,
-            "calf": 16.755160819145562,
-        }
-        dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        # The Solo URDF carries the original 0.380 kg RS02 mass.  Add the
-        # 0.520 kg RS03-RS02 delta to the thigh link, on top of the existing
-        # 0.241 kg RS06-RS02 calf-actuator delta mounted on the same link.
-        body_mass_additions = {"thigh": 0.761}
-
-    class domain_rand(Solo12V31RS06Thigh2Payload100FinalReplayConfig.domain_rand):
-        # RS03 output inertia is not published.  With no external reduction,
-        # retain the existing 1:1 reflected-inertia randomization rather than
-        # inventing a ratio-squared multiplier.
-        armature_ranges = {
-            "hip": [0.0, 0.00504],
-            "thigh": [0.0, 0.00504],
-            "calf": [0.045, 0.095],
-        }
-
-
 class Solo12V31RS06Thigh2StraightObstacleAConfig(
     Solo12V31RS06Thigh2Payload100AdaptConfig
 ):
@@ -1183,6 +1132,119 @@ class Solo12V31RS06Thigh3StraightSlopeAdaptConfig(
         class scales(Solo12V31RS06Thigh2StraightSlope45Config.rewards.scales):
             rated_torque_excess = -0.30
             rated_torque_incidence = -0.80
+
+
+RS03_THIGH_TORQUE_SPEED_CURVE = {
+    # Peak-envelope samples digitized from the official 2026-07-13 RS03 48 V
+    # T-N plot.  The documented 195 rpm no-load point closes at zero torque.
+    "rpm": [
+        0.0, 60.0, 100.0, 120.0, 135.0, 150.0,
+        165.0, 180.0, 185.0, 188.0, 190.0, 195.0,
+    ],
+    "nm": [
+        60.0, 60.0, 60.0, 60.0, 54.5, 47.0,
+        39.0, 28.0, 23.0, 18.0, 10.0, 0.0,
+    ],
+}
+
+
+class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
+    Solo12V31RS06Thigh3StraightObstacleReplayConfig
+):
+    """Move the 3:1 obstacle policy to RS03 thighs with no external stage."""
+
+    class control(Solo12V31RS06Thigh3StraightObstacleReplayConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
+        torque_speed_curves = {
+            **Solo12V31RS06Thigh3StraightObstacleReplayConfig.control.torque_speed_curves,
+            "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+
+    class asset(Solo12V31RS06Thigh3StraightObstacleReplayConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 16.755160819145562,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
+        body_mass_additions = {"thigh": 0.761}
+
+    class domain_rand(Solo12V31RS06Thigh3StraightObstacleReplayConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.045, 0.095],
+        }
+
+    class commands(Solo12V31RS06Thigh3StraightObstacleReplayConfig.commands):
+        class ranges(Solo12V31RS06Thigh3StraightObstacleReplayConfig.commands.ranges):
+            lin_vel_x = [0.0, 1.0]
+
+
+class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
+    Solo12V31RS06Thigh3Speed20AdaptConfig
+):
+    """Move the 3:1 2 m/s policy to RS03 thighs with no external stage."""
+
+    class control(Solo12V31RS06Thigh3Speed20AdaptConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
+        torque_speed_curves = {
+            **Solo12V31RS06Thigh3Speed20AdaptConfig.control.torque_speed_curves,
+            "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+
+    class asset(Solo12V31RS06Thigh3Speed20AdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 16.755160819145562,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
+        body_mass_additions = {"thigh": 0.761}
+
+    class domain_rand(Solo12V31RS06Thigh3Speed20AdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.045, 0.095],
+        }
+
+    class commands(Solo12V31RS06Thigh3Speed20AdaptConfig.commands):
+        class ranges(Solo12V31RS06Thigh3Speed20AdaptConfig.commands.ranges):
+            lin_vel_x = [1.0, 2.0]
+
+
+class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
+    Solo12V31RS06Thigh3StraightSlopeAdaptConfig
+):
+    """Move the 3:1 35--45 degree slope policy to RS03 thighs at 1:1."""
+
+    class control(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 3.0}
+        torque_speed_curves = {
+            **Solo12V31RS06Thigh3StraightSlopeAdaptConfig.control.torque_speed_curves,
+            "thigh": RS03_THIGH_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 11.0}
+
+    class asset(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 16.755160819145562,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
+        body_mass_additions = {"thigh": 0.761}
+
+    class domain_rand(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.045, 0.095],
+        }
+
+    class commands(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.0, 0.7]
 
 
 class Solo12V31RS06Payload100HardReplayConfig(

@@ -31,6 +31,7 @@
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
 import subprocess
+import tempfile
 
 import isaacgym
 from isaacgym import gymapi
@@ -42,6 +43,16 @@ import torch
 
 
 def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
+    if args.command_switch_time_s is not None and args.command_switch_time_s < 0.0:
+        raise ValueError("--command_switch_time_s must be non-negative")
+    after_command = np.asarray(
+        [
+            x_vel if args.command_x_after is None else args.command_x_after,
+            y_vel if args.command_y_after is None else args.command_y_after,
+            yaw_vel if args.command_yaw_after is None else args.command_yaw_after,
+        ],
+        dtype=np.float32,
+    )
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     initial_yaw_rad = np.deg2rad(args.initial_yaw_deg)
     env_cfg.init_state.rot = [
@@ -250,6 +261,7 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     video_process = None
     video_camera = None
     video_path = None
+    video_subtitle_file = None
     video_width = 1280
     video_height = 720
     video_stride = max(1, round(1.0 / (args.video_fps * env.dt)))
@@ -261,13 +273,49 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             os.makedirs(video_dir, exist_ok=True)
         ffmpeg_env = os.environ.copy()
         ffmpeg_env["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+        if args.play_terrain == "slope":
+            scene_line = f"Scene  slope {args.slope_angle_deg:g} deg"
+        elif args.play_terrain == "stairs":
+            scene_line = f"Scene  stairs {args.stair_step_height * 100.0:g} cm"
+        elif args.play_terrain == "uneven":
+            level = args.terrain_level if args.terrain_level is not None else 9
+            scene_line = f"Scene  continuous uneven level {level}"
+        else:
+            scene_line = f"Scene  {args.play_terrain}"
+        if args.command_switch_time_s is None:
+            command_lines = f"Command  {x_vel:g} m/s"
+        else:
+            hold_s = max(args.video_seconds - args.command_switch_time_s, 0.0)
+            command_lines = (
+                f"Approach  {x_vel:g} m/s for {args.command_switch_time_s:g} s\n"
+                f"Hold  {after_command[0]:g} m/s for {hold_s:g} s"
+            )
+        subtitle_text = (
+            "Solo12 v3.1  model 11620  payload 10 kg\n"
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS06 3-to-1\n"
+            f"{scene_line} | seed {args.seed}\n"
+            f"{command_lines}"
+        )
+        video_subtitle_file = tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".txt", delete=False
+        )
+        video_subtitle_file.write(subtitle_text)
+        video_subtitle_file.close()
+        subtitle_filter = (
+            "drawtext="
+            "fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:"
+            f"textfile={video_subtitle_file.name}:"
+            "x=24:y=24:fontsize=24:fontcolor=white:line_spacing=6:"
+            "box=1:boxcolor=black@0.58:boxborderw=12"
+        )
         video_process = subprocess.Popen(
             [
                 "/usr/bin/ffmpeg", "-y", "-loglevel", "error",
                 "-f", "rawvideo", "-pixel_format", "rgba",
                 "-video_size", f"{video_width}x{video_height}",
                 "-framerate", str(args.video_fps), "-i", "-",
-                "-an", "-c:v", "libx264", "-preset", "medium",
+                "-an", "-vf", subtitle_filter,
+                "-c:v", "libx264", "-preset", "medium",
                 "-crf", "20", "-pix_fmt", "yuv420p", video_path,
             ],
             stdin=subprocess.PIPE,
@@ -281,11 +329,17 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
     else:
         num_steps = 10 * int(env.max_episode_length)
     for i in range(num_steps):
-    
+        if (
+            args.command_switch_time_s is not None
+            and i * env.dt >= args.command_switch_time_s
+        ):
+            active_command = after_command
+        else:
+            active_command = (x_vel, y_vel, yaw_vel)
+        env.commands[:, 0] = float(active_command[0])
+        env.commands[:, 1] = float(active_command[1])
+        env.commands[:, 2] = float(active_command[2])
         actions = policy(obs.detach())
-        env.commands[:, 0] = x_vel
-        env.commands[:, 1] = y_vel
-        env.commands[:, 2] = yaw_vel
         obs, _, rews, dones, infos, _, _ = env.step(actions.detach())
 
         if video_process is not None and i % video_stride == 0:
@@ -466,6 +520,9 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             rated_motor_torques_nm=env.rated_motor_torques_nm.detach().cpu().numpy(),
             joint_gear_ratios=env.joint_gear_ratios.detach().cpu().numpy(),
             hard_joint_speed_rad_s=env.dof_vel_limits.detach().cpu().numpy(),
+            stall_motor_torques_nm=(
+                env.torque_limits / env.joint_gear_ratios
+            ).detach().cpu().numpy(),
             base_height_target_m=np.asarray(env_cfg.rewards.base_height_target),
             acceptance_randomization=np.asarray(args.acceptance_randomization),
             acceptance_payload_kg=np.asarray(
@@ -477,12 +534,39 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             acceptance_restitution=np.asarray(
                 -1.0 if args.acceptance_restitution is None else args.acceptance_restitution
             ),
+            command_switch_time_s=np.asarray(
+                -1.0 if args.command_switch_time_s is None else args.command_switch_time_s
+            ),
+            command_after=np.asarray(after_command),
         )
         print("Saved actuator acceptance trace:", trace_path)
+        requested_plots = args.motor_torque_plot or args.motor_speed_plot
+        if requested_plots:
+            if not args.motor_torque_plot or not args.motor_speed_plot:
+                raise ValueError(
+                    "--motor_torque_plot and --motor_speed_plot must be provided together"
+                )
+            plot_command = [
+                os.environ.get("PYTHON", "python"),
+                os.path.join(os.path.dirname(__file__), "plot_solo12_motor_acceptance.py"),
+                trace_path,
+                "--torque-output", os.path.abspath(args.motor_torque_plot),
+                "--speed-output", os.path.abspath(args.motor_speed_plot),
+                "--comparison", args.torque_comparison,
+                "--start-seconds", str(args.analysis_start_seconds),
+                "--title", args.acceptance_title,
+            ]
+            if args.motor_metrics:
+                plot_command.extend(
+                    ["--metrics-output", os.path.abspath(args.motor_metrics)]
+                )
+            subprocess.run(plot_command, check=True)
 
     if video_process is not None:
         video_process.stdin.close()
         return_code = video_process.wait()
+        if video_subtitle_file is not None:
+            os.unlink(video_subtitle_file.name)
         if return_code != 0:
             raise RuntimeError(f"ffmpeg exited with status {return_code}")
         print("Saved play video:", video_path)

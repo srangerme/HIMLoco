@@ -42,7 +42,9 @@ RS06_STAGES = {
 }
 
 RS03_THIGH_STAGES = {
-    "solo12_v3_1_rs03_thigh_payload_10_adapt",
+    "solo12_v3_1_rs03_thigh_payload_10_obstacle_adapt": [0.0, 1.0],
+    "solo12_v3_1_rs03_thigh_payload_10_speed20_adapt": [1.0, 2.0],
+    "solo12_v3_1_rs03_thigh_payload_10_slope_adapt": [0.0, 0.7],
 }
 
 
@@ -89,11 +91,11 @@ def validate_configs():
         assert cfg.control.torque_speed_curves["calf"]["nm"][-1] == 0.0
         assert cfg.asset.dof_torque_limits["calf"] == 108.0
         assert cfg.asset.body_mass_additions == {"thigh": 0.241}
-    assert RS03_THIGH_STAGES <= set(task_registry.task_classes)
-    for task in RS03_THIGH_STAGES:
+    assert set(RS03_THIGH_STAGES) <= set(task_registry.task_classes)
+    for task, command_range in RS03_THIGH_STAGES.items():
         cfg = task_registry.env_cfgs[task]
         assert cfg.domain_rand.payload_mass_range == [0.0, 10.0]
-        assert cfg.domain_rand.payload_max_endpoint_probability == 0.50
+        assert cfg.commands.ranges.lin_vel_x == command_range
         assert cfg.control.joint_gear_ratios == {
             "hip": 1.0,
             "thigh": 1.0,
@@ -111,7 +113,7 @@ def validate_configs():
 
 def validate_runtime():
     args = get_args()
-    args.task = "solo12_v3_1_rs03_thigh_payload_10_adapt"
+    args.task = "solo12_v3_1_rs03_thigh_payload_10_obstacle_adapt"
     args.headless = True
     args.num_envs = 1
     env_cfg, _ = task_registry.get_cfgs(args.task)
