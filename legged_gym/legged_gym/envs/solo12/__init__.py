@@ -49,6 +49,7 @@ from .solo12_v3_1_config import (
     Solo12V31RS06Thigh2Payload100SlopeHighConfig,
     Solo12V31RS06Thigh2Payload100FinalReplayConfig,
     Solo12V31RS06Thigh2Payload100UnevenTorqueRecoveryConfig,
+    Solo12V31RS03ThighPayload100AdaptConfig,
     Solo12V31RS06Thigh2StraightObstacleAConfig,
     Solo12V31RS06Thigh2StraightObstacleBConfig,
     Solo12V31RS06Thigh2StraightObstacleFinalConfig,

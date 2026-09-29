@@ -41,6 +41,10 @@ RS06_STAGES = {
     "solo12_v3_1_rs06_payload_10_torque_recovery": 10.0,
 }
 
+RS03_THIGH_STAGES = {
+    "solo12_v3_1_rs03_thigh_payload_10_adapt",
+}
+
 
 def validate_configs():
     assert set(STAGES) <= set(task_registry.task_classes)
@@ -85,11 +89,29 @@ def validate_configs():
         assert cfg.control.torque_speed_curves["calf"]["nm"][-1] == 0.0
         assert cfg.asset.dof_torque_limits["calf"] == 108.0
         assert cfg.asset.body_mass_additions == {"thigh": 0.241}
+    assert RS03_THIGH_STAGES <= set(task_registry.task_classes)
+    for task in RS03_THIGH_STAGES:
+        cfg = task_registry.env_cfgs[task]
+        assert cfg.domain_rand.payload_mass_range == [0.0, 10.0]
+        assert cfg.domain_rand.payload_max_endpoint_probability == 0.50
+        assert cfg.control.joint_gear_ratios == {
+            "hip": 1.0,
+            "thigh": 1.0,
+            "calf": 3.0,
+        }
+        assert cfg.control.torque_speed_curves["thigh"]["rpm"][-1] == 195.0
+        assert cfg.control.torque_speed_curves["thigh"]["nm"][0] == 60.0
+        assert cfg.control.torque_speed_curves["thigh"]["nm"][-1] == 0.0
+        assert cfg.control.rated_motor_torques_nm["thigh"] == 20.0
+        assert cfg.asset.dof_velocity_limits["thigh"] == 20.420352248333657
+        assert cfg.asset.dof_torque_limits["thigh"] == 60.0
+        assert cfg.asset.body_mass_additions == {"thigh": 0.761}
+        assert cfg.domain_rand.armature_ranges["thigh"] == [0.0, 0.00504]
 
 
 def validate_runtime():
     args = get_args()
-    args.task = "solo12_v3_1_rs06_adapt"
+    args.task = "solo12_v3_1_rs03_thigh_payload_10_adapt"
     args.headless = True
     args.num_envs = 1
     env_cfg, _ = task_registry.get_cfgs(args.task)
@@ -111,7 +133,8 @@ def validate_runtime():
         [1.0, 1.0, 3.0] * 4, device=env.device
     )
     expected_velocity_limits = torch.tensor(
-        [43.9823, 43.9823, 16.755160819145562] * 4, device=env.device
+        [43.9823, 20.420352248333657, 16.755160819145562] * 4,
+        device=env.device,
     )
     assert torch.allclose(env.joint_gear_ratios, expected_gears)
     assert torch.allclose(
@@ -119,11 +142,11 @@ def validate_runtime():
     ), (env.dof_names, env.dof_vel_limits, expected_velocity_limits)
     assert torch.allclose(
         env.rated_motor_torques_nm,
-        torch.tensor([6.0, 6.0, 11.0] * 4, device=env.device),
+        torch.tensor([6.0, 20.0, 11.0] * 4, device=env.device),
     )
     assert torch.allclose(
         env.torque_limits,
-        torch.tensor([17.0, 17.0, 108.0] * 4, device=env.device),
+        torch.tensor([17.0, 60.0, 108.0] * 4, device=env.device),
     )
 
     obs, privileged_obs = env.reset()
