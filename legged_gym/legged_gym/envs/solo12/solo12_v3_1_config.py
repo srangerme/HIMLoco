@@ -1147,6 +1147,22 @@ RS03_THIGH_TORQUE_SPEED_CURVE = {
     ],
 }
 
+# RS03 is also a candidate for a direct (no external reduction) calf drive.
+RS03_DIRECT_TORQUE_SPEED_CURVE = RS03_THIGH_TORQUE_SPEED_CURVE
+
+RS04_DIRECT_TORQUE_SPEED_CURVE = {
+    # Conservative samples digitized from the official 2026-07-13 RS04 48 V
+    # T-N plot.  The documented 200 rpm no-load point closes at zero torque.
+    "rpm": [
+        0.0, 95.0, 110.0, 130.0, 150.0, 155.0,
+        160.0, 170.0, 180.0, 185.0, 188.0, 190.0, 200.0,
+    ],
+    "nm": [
+        120.0, 120.0, 110.0, 95.0, 78.0, 69.0,
+        61.0, 52.0, 45.0, 40.0, 34.0, 10.0, 0.0,
+    ],
+}
+
 
 class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
     Solo12V31RS06Thigh3StraightObstacleReplayConfig
@@ -1169,8 +1185,11 @@ class Solo12V31RS03ThighPayload100ObstacleAdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {}
-        base_mass_addition_kg = 3.044
+        # The thigh actuator stator moves with the hip link; the calf
+        # actuator stator moves with the thigh link.  Values are per leg and
+        # are deltas relative to the all-RS02 URDF mass baseline.
+        body_mass_additions = {"hip": 0.520, "thigh": 0.241}
+        base_mass_addition_kg = 0.0
 
     class domain_rand(Solo12V31RS06Thigh3StraightObstacleReplayConfig.domain_rand):
         armature_ranges = {
@@ -1204,8 +1223,8 @@ class Solo12V31RS03ThighPayload100Speed20AdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {}
-        base_mass_addition_kg = 3.044
+        body_mass_additions = {"hip": 0.520, "thigh": 0.241}
+        base_mass_addition_kg = 0.0
 
     class domain_rand(Solo12V31RS06Thigh3Speed20AdaptConfig.domain_rand):
         armature_ranges = {
@@ -1251,8 +1270,8 @@ class Solo12V31RS03ThighPayload100SlopeAdaptConfig(
             "calf": 16.755160819145562,
         }
         dof_torque_limits = {"thigh": 60.0, "calf": 108.0}
-        body_mass_additions = {}
-        base_mass_addition_kg = 3.044
+        body_mass_additions = {"hip": 0.520, "thigh": 0.241}
+        base_mass_addition_kg = 0.0
 
     class domain_rand(Solo12V31RS06Thigh3StraightSlopeAdaptConfig.domain_rand):
         armature_ranges = {
@@ -1294,6 +1313,258 @@ class Solo12V31RS03ThighPayload100SlopeBridgeConfig(
 
     class commands(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands):
         class ranges(Solo12V31RS03ThighPayload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.35, 0.65]
+
+
+class Solo12V31RS03Calf1Payload100ObstacleAdaptConfig(
+    Solo12V31RS03ThighPayload100ObstacleAdaptConfig
+):
+    """Capability adaptation with RS03 calf actuators and no external stage."""
+
+    class control(Solo12V31RS03ThighPayload100ObstacleAdaptConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 1.0}
+        torque_speed_curves = {
+            **Solo12V31RS03ThighPayload100ObstacleAdaptConfig.control.torque_speed_curves,
+            "calf": RS03_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 20.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 13.0}
+
+    class asset(Solo12V31RS03ThighPayload100ObstacleAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.420352248333657,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 60.0}
+        # RS03 thigh delta belongs to the hip link; RS03 calf delta belongs
+        # to the thigh link.  Values are per leg.
+        body_mass_additions = {"hip": 0.520, "thigh": 0.520}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS03 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03ThighPayload100ObstacleAdaptConfig.domain_rand):
+        # The prior RS06 3:1 estimate divided by 3^2 and scaled by actuator mass.
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.00725, 0.01530],
+        }
+
+
+class Solo12V31RS03Calf1Payload100SpeedAdaptConfig(
+    Solo12V31RS03ThighPayload100SpeedLimitPolishConfig
+):
+    """High-speed capability branch for direct RS03 calf actuators."""
+
+    class control(Solo12V31RS03ThighPayload100SpeedLimitPolishConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 1.0}
+        torque_speed_curves = {
+            **Solo12V31RS03ThighPayload100SpeedLimitPolishConfig.control.torque_speed_curves,
+            "calf": RS03_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 20.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 13.0}
+
+    class asset(Solo12V31RS03ThighPayload100SpeedLimitPolishConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.420352248333657,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 60.0}
+        body_mass_additions = {"hip": 0.520, "thigh": 0.520}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS03 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03ThighPayload100SpeedLimitPolishConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.00725, 0.01530],
+        }
+
+
+class Solo12V31RS03Calf1Payload100SlopeAdaptConfig(
+    Solo12V31RS03ThighPayload100SlopeAdaptConfig
+):
+    """Final 35--45 degree capability branch for direct RS03 calves."""
+
+    class control(Solo12V31RS03ThighPayload100SlopeAdaptConfig.control):
+        joint_gear_ratios = {"hip": 1.0, "thigh": 1.0, "calf": 1.0}
+        torque_speed_curves = {
+            **Solo12V31RS03ThighPayload100SlopeAdaptConfig.control.torque_speed_curves,
+            "calf": RS03_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 20.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 13.0}
+
+    class asset(Solo12V31RS03ThighPayload100SlopeAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.420352248333657,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 60.0}
+        body_mass_additions = {"hip": 0.520, "thigh": 0.520}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS03 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03ThighPayload100SlopeAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.00725, 0.01530],
+        }
+
+
+class Solo12V31RS03Calf1Payload100SlopeWarmupConfig(
+    Solo12V31RS03Calf1Payload100SlopeAdaptConfig
+):
+    class terrain(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 3
+        mixed_slope_angle_range_deg = [20.0, 35.0]
+
+    class commands(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.25, 0.55]
+
+
+class Solo12V31RS03Calf1Payload100SlopeBridgeConfig(
+    Solo12V31RS03Calf1Payload100SlopeAdaptConfig
+):
+    class terrain(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 4
+        mixed_slope_angle_range_deg = [28.0, 42.0]
+
+    class commands(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.35, 0.65]
+
+
+class Solo12V31RS04Calf1Payload100ObstacleAdaptConfig(
+    Solo12V31RS03Calf1Payload100ObstacleAdaptConfig
+):
+    """Capability adaptation with RS04 calf actuators and no external stage."""
+
+    class control(Solo12V31RS03Calf1Payload100ObstacleAdaptConfig.control):
+        torque_speed_curves = {
+            **Solo12V31RS03Calf1Payload100ObstacleAdaptConfig.control.torque_speed_curves,
+            "calf": RS04_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 40.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 28.5}
+
+    class asset(Solo12V31RS03Calf1Payload100ObstacleAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.943951023931955,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 120.0}
+        body_mass_additions = {"hip": 0.520, "thigh": 1.040}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS04 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03Calf1Payload100ObstacleAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.01140, 0.02410],
+        }
+
+
+class Solo12V31RS04Calf1Payload100SpeedAdaptConfig(
+    Solo12V31RS03Calf1Payload100SpeedAdaptConfig
+):
+    """High-speed capability branch for direct RS04 calf actuators."""
+
+    class control(Solo12V31RS03Calf1Payload100SpeedAdaptConfig.control):
+        torque_speed_curves = {
+            **Solo12V31RS03Calf1Payload100SpeedAdaptConfig.control.torque_speed_curves,
+            "calf": RS04_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 40.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 28.5}
+
+    class asset(Solo12V31RS03Calf1Payload100SpeedAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.943951023931955,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 120.0}
+        body_mass_additions = {"hip": 0.520, "thigh": 1.040}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS04 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03Calf1Payload100SpeedAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.01140, 0.02410],
+        }
+
+
+class Solo12V31RS04Calf1Payload100SlopeAdaptConfig(
+    Solo12V31RS03Calf1Payload100SlopeAdaptConfig
+):
+    """Final 35--45 degree capability branch for direct RS04 calves."""
+
+    class control(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.control):
+        torque_speed_curves = {
+            **Solo12V31RS03Calf1Payload100SlopeAdaptConfig.control.torque_speed_curves,
+            "calf": RS04_DIRECT_TORQUE_SPEED_CURVE,
+        }
+        rated_motor_torques_nm = {"hip": 6.0, "thigh": 20.0, "calf": 40.0}
+        stall_rated_motor_torques_nm = {"hip": 6.0, "thigh": 13.0, "calf": 28.5}
+
+    class asset(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.asset):
+        dof_velocity_limits = {
+            "thigh": 20.420352248333657,
+            "calf": 20.943951023931955,
+        }
+        dof_torque_limits = {"thigh": 60.0, "calf": 120.0}
+        body_mass_additions = {"hip": 0.520, "thigh": 1.040}
+        base_mass_addition_kg = 0.0
+        hardware_description = (
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS04 1-to-1"
+        )
+
+    class domain_rand(Solo12V31RS03Calf1Payload100SlopeAdaptConfig.domain_rand):
+        armature_ranges = {
+            "hip": [0.0, 0.00504],
+            "thigh": [0.0, 0.00504],
+            "calf": [0.01140, 0.02410],
+        }
+
+
+class Solo12V31RS04Calf1Payload100SlopeWarmupConfig(
+    Solo12V31RS04Calf1Payload100SlopeAdaptConfig
+):
+    class terrain(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 3
+        mixed_slope_angle_range_deg = [20.0, 35.0]
+
+    class commands(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.commands.ranges):
+            lin_vel_x = [0.25, 0.55]
+
+
+class Solo12V31RS04Calf1Payload100SlopeBridgeConfig(
+    Solo12V31RS04Calf1Payload100SlopeAdaptConfig
+):
+    class terrain(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.terrain):
+        max_init_terrain_level = 4
+        mixed_slope_angle_range_deg = [28.0, 42.0]
+
+    class commands(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.commands):
+        class ranges(Solo12V31RS04Calf1Payload100SlopeAdaptConfig.commands.ranges):
             lin_vel_x = [0.35, 0.65]
 
 

@@ -363,9 +363,14 @@ def play(args, x_vel=1.0, y_vel=0.0, yaw_vel=0.0):
             if args.acceptance_friction is None
             else f"{args.acceptance_friction:g}"
         )
+        hardware_description = getattr(
+            env.cfg.asset,
+            "hardware_description",
+            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS06 3-to-1",
+        )
         subtitle_text = (
             f"Solo12 v3.1  model {checkpoint_label}  payload {payload_label}\n"
-            "Hip RS02 1-to-1 | Thigh RS03 1-to-1 | Calf RS06 3-to-1\n"
+            f"{hardware_description}\n"
             f"{scene_line} | friction {friction_label} | seed {args.seed}\n"
             f"{command_lines}"
         )

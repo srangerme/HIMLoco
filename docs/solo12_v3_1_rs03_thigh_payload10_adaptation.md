@@ -11,12 +11,11 @@
 The RS03 model uses the official 2026-07-13 48 V peak torque-speed plot,
 `60 Nm` peak torque, a conservative `20 Nm` continuous-duty objective, and a
 `195 rpm` zero-torque speed endpoint.  The RS03-minus-RS02 thigh actuator delta
-is `0.520 kg` per leg and the RS06-minus-RS02 calf actuator delta is `0.241 kg`
-per leg.  For this hardware study, the combined `0.761 kg` per leg is not
-placed on a thigh or calf rigid body; all four legs' `3.044 kg` actuator delta
-is placed on the base rigid body.  At the fixed `10 kg` acceptance endpoint,
-the base therefore carries `13.044 kg` total additional mass while total robot
-mass remains unchanged from the earlier distributed-mass model.
+is `0.520 kg` per leg and is added to the hip link that carries the thigh
+stator.  The RS06-minus-RS02 calf actuator delta is `0.241 kg` per leg and is
+added to the thigh link that carries the calf stator.  No motor-mass delta is
+added to the base.  The independent fixed `10 kg` acceptance payload remains
+on the base rigid body at its existing center of mass.
 
 Sources:
 
@@ -131,7 +130,7 @@ diagnostic-only; it is not a deployment or acceptance candidate.  The
 interrupted direct 35--45 degree run
 `Sep29_10-07-44_rs03_slope_from_base_11100_to11300` is also diagnostic-only.
 
-## Base-mass redistribution adaptation
+## Historical base-mass redistribution adaptation
 
 After moving the fixed `3.044 kg` actuator delta from the four thigh links to
 the base, adapt once with the common obstacle policy and branch from that new
@@ -175,7 +174,7 @@ Acceptance traces must report thigh gear ratio `1.0`, thigh hard speed limit
 `20.420352248333657 rad/s`, thigh peak torque limit `60 Nm`, and fixed payload
 `10.0 kg` on the base rigid body.
 
-## Base-mass candidate result
+## Historical base-mass candidate result
 
 The final 50-environment capability probe uses the common checkpoint `11200`,
 speed checkpoint `11400`, and slope checkpoint `11500` listed above.
@@ -204,3 +203,37 @@ about `478.6 rpm` against its `480 rpm` limit on slopes.  The configuration is
 therefore majority-capable in simulation, but has essentially no speed margin
 for high-speed uneven terrain or steep-slope impacts; that limitation is kept
 as a module requirement rather than polished away with further training.
+
+The two historical sections above kept all actuator deltas on the base and are
+retained only for comparison.  They are superseded by the link-mounted result
+below.
+
+## Link-mounted motor-mass re-adaptation (canonical)
+
+The corrected mass model adds the `0.520 kg` RS03 thigh delta to each hip link
+and the `0.241 kg` RS06 calf delta to each thigh link.  Motor delta on the base
+is zero; the independent acceptance payload remains `10 kg` on the base.
+
+All stages used 4096 environments.  The accepted runs are:
+
+- base: `Oct10_08-42-15_rs03_rs06_linkmass_base_11200_to11400`, model 11400;
+- speed: `Oct10_09-21-47_rs03_rs06_linkmass_speed_11400_to11700`, model 11700;
+- slope final: `Oct10_10-59-57_rs03_rs06_linkmass_slope_final_11600_to11800`,
+  model 11800.
+
+The 50-environment capability result is:
+
+- plane 1.0/1.5/2.0 m/s: 50/50 without reset, mean speed
+  `0.995/1.424/1.785 m/s`;
+- level-9 uneven 1.0/1.5/2.0 m/s: `50/48/41` environments without reset,
+  mean speed `0.941/1.313/1.557 m/s`;
+- continuous 15 cm stairs: 50/50 enter and advance at least 1 m;
+- 40 degree slopes: 50/50 at both speeds;
+- 45 degree slopes: 49/50 advance at least 1 m at both speeds;
+- plane stand: 50/50 without reset; stair stand: 49/50 without reset.
+
+Every selected sample is inside the configured torque-speed envelope.  The
+lowest hard-speed compliance is `99.426%` on uneven 2.0 m/s and the lowest
+rated/stall-reference compliance is `98.652%` on the same scene.  The
+canonical dataset is under
+`/tmp/solo12_hardware_test_data_20260924/link_mass_corrected_20261010/03_thigh_rs03_ratio1_calf_rs06_ratio3/10kg`.

@@ -50,6 +50,19 @@ RS03_THIGH_STAGES = {
     "solo12_v3_1_rs03_thigh_payload_10_slope_adapt": [0.45, 0.7],
 }
 
+DIRECT_CALF_STAGES = {
+    "solo12_v3_1_rs03_calf1_payload_10_obstacle_adapt": (195.0, 60.0, 20.0, 13.0, {"hip": 0.520, "thigh": 0.520}),
+    "solo12_v3_1_rs03_calf1_payload_10_speed_adapt": (195.0, 60.0, 20.0, 13.0, {"hip": 0.520, "thigh": 0.520}),
+    "solo12_v3_1_rs03_calf1_payload_10_slope_warmup": (195.0, 60.0, 20.0, 13.0, {"hip": 0.520, "thigh": 0.520}),
+    "solo12_v3_1_rs03_calf1_payload_10_slope_bridge": (195.0, 60.0, 20.0, 13.0, {"hip": 0.520, "thigh": 0.520}),
+    "solo12_v3_1_rs03_calf1_payload_10_slope_adapt": (195.0, 60.0, 20.0, 13.0, {"hip": 0.520, "thigh": 0.520}),
+    "solo12_v3_1_rs04_calf1_payload_10_obstacle_adapt": (200.0, 120.0, 40.0, 28.5, {"hip": 0.520, "thigh": 1.040}),
+    "solo12_v3_1_rs04_calf1_payload_10_speed_adapt": (200.0, 120.0, 40.0, 28.5, {"hip": 0.520, "thigh": 1.040}),
+    "solo12_v3_1_rs04_calf1_payload_10_slope_warmup": (200.0, 120.0, 40.0, 28.5, {"hip": 0.520, "thigh": 1.040}),
+    "solo12_v3_1_rs04_calf1_payload_10_slope_bridge": (200.0, 120.0, 40.0, 28.5, {"hip": 0.520, "thigh": 1.040}),
+    "solo12_v3_1_rs04_calf1_payload_10_slope_adapt": (200.0, 120.0, 40.0, 28.5, {"hip": 0.520, "thigh": 1.040}),
+}
+
 
 def validate_configs():
     assert set(STAGES) <= set(task_registry.task_classes)
@@ -110,8 +123,25 @@ def validate_configs():
         assert cfg.control.rated_motor_torques_nm["thigh"] == 20.0
         assert cfg.asset.dof_velocity_limits["thigh"] == 20.420352248333657
         assert cfg.asset.dof_torque_limits["thigh"] == 60.0
-        assert cfg.asset.body_mass_additions == {"thigh": 0.761}
+        assert cfg.asset.body_mass_additions == {"hip": 0.520, "thigh": 0.241}
+        assert cfg.asset.base_mass_addition_kg == 0.0
         assert cfg.domain_rand.armature_ranges["thigh"] == [0.0, 0.00504]
+    assert set(DIRECT_CALF_STAGES) <= set(task_registry.task_classes)
+    for task, (max_rpm, peak_nm, rated_nm, stall_nm, mass_additions) in DIRECT_CALF_STAGES.items():
+        cfg = task_registry.env_cfgs[task]
+        assert cfg.control.joint_gear_ratios == {
+            "hip": 1.0,
+            "thigh": 1.0,
+            "calf": 1.0,
+        }
+        assert cfg.control.torque_speed_curves["calf"]["rpm"][-1] == max_rpm
+        assert cfg.control.torque_speed_curves["calf"]["nm"][0] == peak_nm
+        assert cfg.control.torque_speed_curves["calf"]["nm"][-1] == 0.0
+        assert cfg.control.rated_motor_torques_nm["calf"] == rated_nm
+        assert cfg.control.stall_rated_motor_torques_nm["calf"] == stall_nm
+        assert cfg.asset.dof_torque_limits["calf"] == peak_nm
+        assert cfg.asset.body_mass_additions == mass_additions
+        assert cfg.asset.base_mass_addition_kg == 0.0
 
 
 def validate_runtime():
